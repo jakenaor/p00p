@@ -153,6 +153,12 @@ class CommandTests(Unittest.TestCase):
             self.assertEqual(Result, 1)
             self.assertIn("requires --generate", Error)
 
+    def testGuiCommandUsesTheNormalVaultArgument(self):
+        Args = Main.BuildParser().parse_args(("gui", "--vault", ".test.poop"))
+
+        self.assertIs(Args.handler, Main.CommandGui)
+        self.assertEqual(Args.vault, Path(".test.poop"))
+
 
 if __name__ == "__main__":
     Unittest.main()

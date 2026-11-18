@@ -447,6 +447,12 @@ def CommandAnatomy(Args):
     print(f"decoded:      {len(Vault['entries'])} entries, integrity check passed")
 
 
+#MARK: graphical stuffs
+def CommandGui(Args):
+    from gui import RunGui
+    RunGui(StartPath=Args.vault)
+
+
 #MARK: argument stuffs
 def AddVaultArgument(Parser):
     Parser.add_argument(
@@ -554,6 +560,10 @@ def BuildParser():
     )
     AddVaultArgument(AnatomyParser)
     AnatomyParser.set_defaults(handler=CommandAnatomy)
+
+    GuiParser = Subparsers.add_parser("gui", help="open the tkinter password bowl")
+    AddVaultArgument(GuiParser)
+    GuiParser.set_defaults(handler=CommandGui)
     return Parser
 
 

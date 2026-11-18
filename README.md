@@ -17,6 +17,7 @@ terminal app + custom binary format wrapped in the worlds worst security advice
 - generate random passwords using python's `secrets` stuff
 - audit weak/reused passwords without printing the actual password
 - show u the weird file guts with the `anatomy` command
+- use all of that from a tkinter GUI if terminal commands arent your thing
 
 ## important thing before u use it
 
@@ -36,6 +37,25 @@ u need **Python 3.9 or newer**. there are no packages to install because i didnt
 feel like making u download half of the internet for one poop file
 
 these commands are for a macOS/Linux terminal:
+
+the easy graphical version:
+
+~~~sh
+python3 main.py gui
+~~~
+
+that opens the password bowl window. from there u can make/open vaults, search,
+add/edit/remove entries, reveal or temporarily copy a password, run an audit,
+and inspect the file guts. copied passwords clear from the clipboard after 20
+seconds if something else hasnt replaced them already
+
+if u want to open a specific bowl:
+
+~~~sh
+python3 main.py gui --vault .secrets.poop
+~~~
+
+the terminal version still works too:
 
 ~~~sh
 # make the default hidden vault
@@ -116,6 +136,7 @@ something
 | `generate` / `gen` | makes a random password without storing it |
 | `audit` | finds basic password/file hygiene problems |
 | `anatomy` | shows the binary file bits + checks the file |
+| `gui` | opens the tkinter password bowl |
 
 ## how the weird storage works
 
@@ -141,8 +162,8 @@ python3 -m unittest -v
 ~~~
 
 the project only uses python's standard library. the tests cover encoding,
-corruption checks, password generation, file permissions, and the whole CLI
-workflow
+corruption checks, password generation, file permissions, GUI search/audit
+helpers, and the whole CLI workflow
 
 ## credits + important legal poop
 
