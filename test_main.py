@@ -1,48 +1,158 @@
-import tempfile
-import unittest
+import contextlib as Contextlib
+import io as Io
+import string as String
+import tempfile as Tempfile
+import unittest as Unittest
 from pathlib import Path
 
-import main
+import main as Main
 
 
-class FormatTests(unittest.TestCase):
-    def test_round_trip(self):
-        vault = main.new_vault()
-        vault["entries"]["example.com"] = {
+#MARK: file format stuffs
+class FormatTests(Unittest.TestCase):
+    def testRoundTrip(self):
+        Vault = Main.NewVault()
+        Vault["entries"]["example.com"] = {
             "username": "fake-user",
             "password": "fake-password",
             "notes": "demo only",
         }
 
-        encoded = main.encode_vault(vault, salt=b"0" * main.SALT_SIZE)
-        decoded = main.decode_vault(encoded)
+        Encoded = Main.EncodeVault(Vault, Salt=b"0" * Main.SALT_SIZE)
+        Decoded = Main.DecodeVault(Encoded)
 
-        self.assertEqual(decoded, vault)
-        self.assertNotIn(b"fake-password", encoded)
-        self.assertNotIn(b"example.com", encoded)
+        self.assertEqual(Decoded, Vault)
+        self.assertNotIn(b"fake-password", Encoded)
+        self.assertNotIn(b"example.com", Encoded)
 
-    def test_corruption_is_detected(self):
-        encoded = bytearray(main.encode_vault(main.new_vault()))
-        encoded[-main.DIGEST_SIZE - 1] ^= 1
+    def testCorruptionIsDetected(self):
+        Encoded = bytearray(Main.EncodeVault(Main.NewVault()))
+        Encoded[-Main.DIGEST_SIZE - 1] ^= 1
 
-        with self.assertRaisesRegex(main.P00PError, "integrity check failed"):
-            main.decode_vault(bytes(encoded))
+        with self.assertRaisesRegex(Main.P00PError, "integrity check failed"):
+            Main.DecodeVault(bytes(Encoded))
 
-    def test_invalid_file_is_rejected(self):
-        with self.assertRaisesRegex(main.P00PError, "not a valid"):
-            main.decode_vault(b"definitely not p00p")
+    def testInvalidFileIsRejected(self):
+        with self.assertRaisesRegex(Main.P00PError, "not a valid"):
+            Main.DecodeVault(b"definitely not p00p")
+
+    def testHeaderCanBeInspected(self):
+        Encoded = Main.EncodeVault(Main.NewVault(), Salt=b"s" * Main.SALT_SIZE)
+        Header = Main.ParseHeader(Encoded)
+
+        self.assertEqual(Header["version"], Main.VERSION)
+        self.assertEqual(Header["salt"], b"s" * Main.SALT_SIZE)
+        self.assertEqual(Header["file_size"], len(Encoded))
+        self.assertEqual(
+            Header["header_size"] + Header["payload_size"] + Main.DIGEST_SIZE,
+            len(Encoded),
+        )
+
+    def testMalformedEntryIsRejected(self):
+        Vault = Main.NewVault()
+        Vault["entries"]["broken"] = {"password": 12345}
+
+        with self.assertRaisesRegex(Main.P00PError, "invalid password"):
+            Main.EncodeVault(Vault)
 
 
-class StorageTests(unittest.TestCase):
-    def test_save_and_load(self):
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / ".test.p00p"
-            vault = main.new_vault()
-            main.save_vault(path, vault)
+#MARK: password stuffs
+class PasswordTests(Unittest.TestCase):
+    def testGeneratedPasswordHasAllTheStuffs(self):
+        Password = Main.GeneratePassword(40)
 
-            self.assertEqual(main.load_vault(path)["entries"], {})
-            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(len(Password), 40)
+        self.assertTrue(any(Character.islower() for Character in Password))
+        self.assertTrue(any(Character.isupper() for Character in Password))
+        self.assertTrue(any(Character.isdigit() for Character in Password))
+        self.assertTrue(any(Character in Main.PASSWORD_SYMBOLS for Character in Password))
+
+    def testGeneratedPasswordCanSkipSymbols(self):
+        Password = Main.GeneratePassword(32, Symbols=False)
+        AllowedCharacters = String.ascii_letters + String.digits
+
+        self.assertTrue(all(Character in AllowedCharacters for Character in Password))
+
+    def testGeneratedPasswordLengthIsLimited(self):
+        with self.assertRaisesRegex(Main.P00PError, "between"):
+            Main.GeneratePassword(Main.MIN_PASSWORD_LENGTH - 1)
+        with self.assertRaisesRegex(Main.P00PError, "between"):
+            Main.GeneratePassword(Main.MAX_PASSWORD_LENGTH + 1)
+
+    def testAuditFindsBadPasswordStuffs(self):
+        Issues = Main.PasswordIssues("password")
+
+        self.assertTrue(any("common-password" in Issue for Issue in Issues))
+        self.assertTrue(any("shorter" in Issue for Issue in Issues))
+        self.assertTrue(any("no uppercase" in Issue for Issue in Issues))
+
+
+#MARK: saving stuffs
+class StorageTests(Unittest.TestCase):
+    def testSaveAndLoad(self):
+        with Tempfile.TemporaryDirectory() as Directory:
+            FilePath = Path(Directory) / ".test.p00p"
+            Vault = Main.NewVault()
+            Main.SaveVault(FilePath, Vault)
+
+            self.assertEqual(Main.LoadVault(FilePath)["entries"], {})
+            self.assertEqual(FilePath.stat().st_mode & 0o777, 0o600)
+
+
+#MARK: command stuffs
+class CommandTests(Unittest.TestCase):
+    def RunCli(self, *Arguments):
+        Output = Io.StringIO()
+        Errors = Io.StringIO()
+        with Contextlib.redirect_stdout(Output), Contextlib.redirect_stderr(Errors):
+            Result = Main.RunApp(Arguments)
+        return Result, Output.getvalue(), Errors.getvalue()
+
+    def testExpandedWorkflow(self):
+        with Tempfile.TemporaryDirectory() as Directory:
+            FilePath = Path(Directory) / ".workflow.p00p"
+            VaultArgument = ("--vault", str(FilePath))
+
+            self.assertEqual(self.RunCli("init", *VaultArgument)[0], 0)
+            Result, GeneratedOutput, _ = self.RunCli(
+                "add", "Example", "--username", "demo-user",
+                "--notes", "space service", "--generate", "20", *VaultArgument,
+            )
+            self.assertEqual(Result, 0)
+            self.assertIn("generated password:", GeneratedOutput)
+            Password = Main.LoadVault(FilePath)["entries"]["Example"]["password"]
+            self.assertEqual(len(Password), 20)
+
+            Result, SearchOutput, _ = self.RunCli("search", "SPACE", *VaultArgument)
+            self.assertEqual(Result, 0)
+            self.assertIn("Example\tdemo-user", SearchOutput)
+
+            Result, _, _ = self.RunCli("rename", "example", "Moon Base", *VaultArgument)
+            self.assertEqual(Result, 0)
+            self.assertIn("Moon Base", Main.LoadVault(FilePath)["entries"])
+
+            Result, AuditOutput, _ = self.RunCli("audit", *VaultArgument)
+            self.assertEqual(Result, 0)
+            Password = Main.LoadVault(FilePath)["entries"]["Moon Base"]["password"]
+            self.assertNotIn(Password, AuditOutput)
+
+            Result, AnatomyOutput, _ = self.RunCli("anatomy", *VaultArgument)
+            self.assertEqual(Result, 0)
+            self.assertIn("integrity check passed", AnatomyOutput)
+
+    def testNoSymbolsRequiresGeneration(self):
+        with Tempfile.TemporaryDirectory() as Directory:
+            FilePath = Path(Directory) / ".test.p00p"
+            self.RunCli("init", "--vault", str(FilePath))
+
+            Result, _, Error = self.RunCli(
+                "add", "Example", "--password", "not-a-secret", "--no-symbols",
+                "--vault", str(FilePath),
+            )
+
+            self.assertEqual(Result, 1)
+            self.assertIn("requires --generate", Error)
 
 
 if __name__ == "__main__":
-    unittest.main()
+    Unittest.main()
