@@ -1,0 +1,6 @@
+__pycache__/
+*.py[cod]
+
+# A joke vault can still contain secrets. Never commit one.
+*.p00p
+*.poop
