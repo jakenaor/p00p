@@ -32,6 +32,31 @@ SHAKE-256 spits out exactly as many bytes as the payload needs. decoding makes
 the same stream, XORs it again, and decompresses the result because XOR is weird
 like that
 
+## the extremely necessary poopline ritual
+
+the file format still only does the three operations above. the code now makes
+them wear name tags and stand in a very official line though:
+
+~~~text
+PoopParcel
+  -> JsonGoblin       (dict becomes sorted compact UTF-8)
+  -> TrashCompactor   (UTF-8 becomes zlib bytes)
+  -> ToiletCurtain    (zlib bytes get the reversible XOR disguise)
+~~~
+
+`RitualBook.Perform()` looks up a direction, dynamically chooses the matching
+method on every goblin, passes around a context object, and saves a receipt for
+each handoff. decoding reverses the stage order and asks every goblin to do its
+opposite move. yes, this is ridiculous. that is the point
+
+the receipts only contain stage names, Python type names, and byte counts. they
+never contain payload bytes or password text. `anatomy` prints a one-line ritual
+summary so u can admire all the ceremony
+
+most importantly, old version-1 files and newly written files are byte-compatible.
+the test suite independently runs the original boring three-line algorithm and
+checks that the enormous poopline produces the exact same bytes
+
 the JSON inside looks like this:
 
 ~~~json
@@ -70,6 +95,10 @@ anyone with this source code can reverse the encoding. SHAKE-256 sounds fancy,
 but im using it as a repeatable camouflage stream, **not encryption**. the key
 is a public constant sitting in the decoder. the random salt changes how each
 save looks; it does not make the contents secret
+
+adding classes, dynamic method lookup, parcels, receipts, a context object, and
+three named goblins also does not make it secret. complexity is not cryptography,
+even when the complexity has excellent poop jokes
 
 the point is to mess with custom storage, parsing, checksums, atomic saves, and
 why hiding stuff is not the same as securing it. do not put real credentials in

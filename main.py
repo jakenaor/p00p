@@ -12,7 +12,6 @@
 import argparse as Argparse
 import getpass as Getpass
 import hashlib as Hashlib
-import json as Json
 import os as Os
 import secrets as Secrets
 import string as String
@@ -20,9 +19,10 @@ import struct as Struct
 import subprocess as Subprocess
 import sys as Sys
 import tempfile as Tempfile
-import zlib as Zlib
 from datetime import datetime as DateTime, timezone as Timezone
 from pathlib import Path
+
+import poopline as Poopline
 
 
 MAGIC = b"P00P\x00"
@@ -69,15 +69,13 @@ def NewVault():
 #MARK: hiding the poops
 def Camouflage(Data, Salt):
     # looks random enough to grep. it is still not encryption dum dum.
-    Stream = Hashlib.shake_256(CAMOUFLAGE_KEY + Salt).digest(len(Data))
-    return bytes(Left ^ Right for Left, Right in zip(Data, Stream))
+    return Poopline.CamouflageBytes(Data, Salt, CAMOUFLAGE_KEY)
 
 
 def EncodeVault(Vault, Salt=None):
     ValidateVault(Vault)
     Salt = Salt or Secrets.token_bytes(SALT_SIZE)
-    Raw = Json.dumps(Vault, separators=(",", ":"), sort_keys=True).encode("utf-8")
-    Payload = Camouflage(Zlib.compress(Raw, level=9), Salt)
+    Payload = Poopline.EncodePayload(Vault, Salt, CAMOUFLAGE_KEY)
     Header = MAGIC + bytes([VERSION]) + Salt + Struct.pack(">I", len(Payload))
     Digest = Hashlib.sha256(Header + Payload).digest()[:DIGEST_SIZE]
     return Header + Payload + Digest
@@ -109,13 +107,20 @@ def DecodeVault(Blob):
         raise P00PError("the vault is corrupted (integrity check failed)")
 
     try:
-        Raw = Zlib.decompress(Camouflage(Payload, Salt))
-        Vault = Json.loads(Raw.decode("utf-8"))
-    except (Zlib.error, UnicodeDecodeError, Json.JSONDecodeError) as Exc:
-        raise P00PError("the vault payload could not be decoded") from Exc
+        Vault = Poopline.DecodePayload(Payload, Salt, CAMOUFLAGE_KEY)
+    except Poopline.PooplineError as Exc:
+        raise P00PError(f"the vault payload could not be decoded ({Exc.StageName} failed)") from Exc
 
     ValidateVault(Vault)
     return Vault
+
+
+def PayloadRitualSummary(Vault, Salt):
+    Receipts = Poopline.InspectPayloadRitual(Vault, Salt, CAMOUFLAGE_KEY)
+    return " -> ".join(
+        f"{Receipt['stage']} {Receipt['before_size']}B>{Receipt['after_size']}B"
+        for Receipt in Receipts
+    )
 
 
 #MARK: checking the poops
@@ -446,6 +451,7 @@ def CommandAnatomy(Args):
     print(f"checksum:     {Header['digest'].hex()}")
     print(f"total bytes:  {Header['file_size']}")
     print(f"decoded:      {len(Vault['entries'])} entries, integrity check passed")
+    print(f"poopline:     {PayloadRitualSummary(Vault, Header['salt'])}")
 
 
 #MARK: graphical stuffs

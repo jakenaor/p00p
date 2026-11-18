@@ -41,6 +41,65 @@ def FilterEntryNames(Vault, Query=""):
     return sorted(Names, key=str.casefold)
 
 
+def EntryIssueCounts(Vault):
+    Counts = {}
+    Fingerprints = {}
+    for Name, Entry in Vault.get("entries", {}).items():
+        Password = Entry.get("password", "")
+        Counts[Name] = len(Main.PasswordIssues(Password))
+        if not Entry.get("username"):
+            Counts[Name] += 1
+        Fingerprint = Hashlib.sha256(Password.encode("utf-8")).hexdigest()
+        Fingerprints.setdefault(Fingerprint, []).append(Name)
+
+    for Names in Fingerprints.values():
+        if len(Names) > 1:
+            for Name in Names:
+                Counts[Name] += 1
+    return Counts
+
+
+def EntryRows(Vault, Query="", SortColumn="name", Descending=False):
+    Counts = EntryIssueCounts(Vault)
+    Rows = []
+    for Name in FilterEntryNames(Vault, Query):
+        Entry = Vault["entries"][Name]
+        Rows.append({
+            "name": Name,
+            "username": Entry.get("username") or "—",
+            "health": Counts.get(Name, 0),
+            "updated": str(Entry.get("updated_at") or "unknown"),
+        })
+
+    if SortColumn not in {"name", "username", "health", "updated"}:
+        SortColumn = "name"
+
+    def SortValue(Row):
+        Value = Row[SortColumn]
+        if isinstance(Value, str):
+            Value = Value.casefold()
+        return (Value, Row["name"].casefold())
+
+    return sorted(Rows, key=SortValue, reverse=Descending)
+
+
+def VaultSummary(Vault, Query=""):
+    Counts = EntryIssueCounts(Vault)
+    Total = len(Vault.get("entries", {}))
+    Shown = len(FilterEntryNames(Vault, Query))
+    NeedsWork = sum(Count > 0 for Count in Counts.values())
+    return {
+        "total": Total,
+        "shown": Shown,
+        "needs_work": NeedsWork,
+        "issues": sum(Counts.values()),
+    }
+
+
+def PasswordMask(Password):
+    return "•" * 12 if Password else "—"
+
+
 def AuditVault(Vault, FilePath=None):
     Findings = []
     Fingerprints = {}
@@ -90,6 +149,7 @@ def FormatAnatomy(FilePath):
         f"checksum:      {Header['digest'].hex()}",
         f"total bytes:   {Header['file_size']}",
         f"decoded:       {len(Vault['entries'])} entries, integrity check passed",
+        f"poopline:      {Main.PayloadRitualSummary(Vault, Header['salt'])}",
     ))
 
 
@@ -106,9 +166,13 @@ class P00PWindow(Tk.Tk):
         self.FilePath = None
         self.SelectedName = None
         self.PasswordVisible = False
+        self.RevealAfterId = None
+        self.SortColumn = "name"
+        self.SortDescending = False
         self.SearchText = Tk.StringVar()
         self.PathText = Tk.StringVar(value="no bowl open")
         self.StatusText = Tk.StringVar(value="make or open a .p00p bowl to start")
+        self.ListSummaryText = Tk.StringVar(value="no bowl open")
 
         self.BuildStyles()
         self.BuildMenu()
@@ -210,7 +274,7 @@ class P00PWindow(Tk.Tk):
         Left = Ttk.Frame(Parent, style="P00P.TFrame", padding=14)
         Left.grid(row=0, column=0, sticky="nsew", padx=(0, 5))
         Left.columnconfigure(0, weight=1)
-        Left.rowconfigure(2, weight=1)
+        Left.rowconfigure(3, weight=1)
 
         Heading = Ttk.Frame(Left, style="P00P.TFrame")
         Heading.grid(row=0, column=0, sticky="ew", pady=(0, 10))
@@ -226,17 +290,23 @@ class P00PWindow(Tk.Tk):
         self.SearchEntry = Search
         self.SearchText.trace_add("write", lambda *_: self.RefreshList())
 
+        Ttk.Label(Left, textvariable=self.ListSummaryText, style="Muted.TLabel").grid(
+            row=2, column=0, sticky="w", pady=(0, 8))
+
         TreeFrame = Ttk.Frame(Left, style="P00P.TFrame")
-        TreeFrame.grid(row=2, column=0, sticky="nsew")
+        TreeFrame.grid(row=3, column=0, sticky="nsew")
         TreeFrame.columnconfigure(0, weight=1)
         TreeFrame.rowconfigure(0, weight=1)
-        self.EntryTree = Ttk.Treeview(TreeFrame, columns=("username", "updated"),
+        self.EntryTree = Ttk.Treeview(TreeFrame, columns=("username", "health", "updated"),
                                       show="tree headings", style="P00P.Treeview")
-        self.EntryTree.heading("#0", text="name")
-        self.EntryTree.heading("username", text="username")
-        self.EntryTree.heading("updated", text="updated")
+        self.EntryTree.heading("#0", text="name", command=lambda: self.ChangeSort("name"))
+        self.EntryTree.heading("username", text="username",
+                               command=lambda: self.ChangeSort("username"))
+        self.EntryTree.heading("health", text="health", command=lambda: self.ChangeSort("health"))
+        self.EntryTree.heading("updated", text="updated", command=lambda: self.ChangeSort("updated"))
         self.EntryTree.column("#0", width=190, minwidth=120)
-        self.EntryTree.column("username", width=150, minwidth=100)
+        self.EntryTree.column("username", width=140, minwidth=100)
+        self.EntryTree.column("health", width=80, minwidth=70, anchor="center")
         self.EntryTree.column("updated", width=105, minwidth=90, anchor="center")
         Scroll = Ttk.Scrollbar(TreeFrame, orient="vertical", command=self.EntryTree.yview)
         self.EntryTree.configure(yscrollcommand=Scroll.set)
@@ -256,30 +326,34 @@ class P00PWindow(Tk.Tk):
         self.UsernameValue = self.DetailRow(Right, 2, "username")
         self.PasswordValue = self.DetailRow(Right, 3, "password")
         self.UpdatedValue = self.DetailRow(Right, 4, "updated")
+        self.HealthValue = self.DetailRow(Right, 5, "health")
 
         Ttk.Label(Right, text="notes", style="Muted.TLabel").grid(
-            row=5, column=0, sticky="w", pady=(16, 4))
+            row=6, column=0, sticky="w", pady=(16, 4))
         self.NotesText = Tk.Text(Right, height=6, wrap="word", bg=PANEL_LIGHT, fg=TEXT,
                                  insertbackground=TEXT, relief="flat", font=(FONT, 11),
                                  padx=10, pady=8, state="disabled")
-        self.NotesText.grid(row=6, column=0, sticky="nsew")
-        Right.rowconfigure(6, weight=1)
+        self.NotesText.grid(row=7, column=0, sticky="nsew")
+        Right.rowconfigure(7, weight=1)
 
         Buttons = Ttk.Frame(Right, style="P00P.TFrame")
-        Buttons.grid(row=7, column=0, sticky="ew", pady=(16, 0))
+        Buttons.grid(row=8, column=0, sticky="ew", pady=(16, 0))
         Buttons.columnconfigure((0, 1), weight=1)
         self.RevealButton = Ttk.Button(Buttons, text="reveal", style="Quiet.TButton",
                                       command=self.TogglePassword)
         self.RevealButton.grid(row=0, column=0, sticky="ew", padx=(0, 4), pady=4)
-        self.CopyButton = Ttk.Button(Buttons, text="copy", style="Quiet.TButton",
+        self.CopyButton = Ttk.Button(Buttons, text="copy password", style="Quiet.TButton",
                                     command=self.CopyPassword)
         self.CopyButton.grid(row=0, column=1, sticky="ew", padx=(4, 0), pady=4)
+        self.CopyUsernameButton = Ttk.Button(Buttons, text="copy username", style="Quiet.TButton",
+                                            command=self.CopyUsername)
+        self.CopyUsernameButton.grid(row=1, column=0, columnspan=2, sticky="ew", pady=4)
         self.EditButton = Ttk.Button(Buttons, text="edit", style="P00P.TButton",
                                     command=self.EditEntry)
-        self.EditButton.grid(row=1, column=0, sticky="ew", padx=(0, 4), pady=4)
+        self.EditButton.grid(row=2, column=0, sticky="ew", padx=(0, 4), pady=4)
         self.RemoveButton = Ttk.Button(Buttons, text="remove", style="Danger.TButton",
                                       command=self.RemoveEntry)
-        self.RemoveButton.grid(row=1, column=1, sticky="ew", padx=(4, 0), pady=4)
+        self.RemoveButton.grid(row=2, column=1, sticky="ew", padx=(4, 0), pady=4)
 
     def DetailRow(self, Parent, Row, Label):
         Box = Ttk.Frame(Parent, style="P00P.TFrame")
@@ -331,6 +405,8 @@ class P00PWindow(Tk.Tk):
             return
         self.Vault = Vault
         self.FilePath = FilePath
+        self.CancelRevealTimer()
+        self.PasswordVisible = False
         self.PathText.set(str(FilePath))
         self.SelectedName = None
         self.SearchText.set("")
@@ -355,6 +431,7 @@ class P00PWindow(Tk.Tk):
             return False
         self.Vault = Vault
         self.FilePath = Path(FilePath)
+        self.CancelRevealTimer()
         self.PathText.set(str(self.FilePath))
         self.SelectedName = None
         self.PasswordVisible = False
@@ -381,16 +458,25 @@ class P00PWindow(Tk.Tk):
         for Item in self.EntryTree.get_children():
             self.EntryTree.delete(Item)
         if self.Vault is None:
+            self.ListSummaryText.set("no bowl open")
             self.ShowDetails(None)
             self.UpdateControls()
             return
 
-        Names = FilterEntryNames(self.Vault, self.SearchText.get())
-        for Name in Names:
-            Entry = self.Vault["entries"][Name]
-            Updated = str(Entry.get("updated_at", "unknown"))[:10]
-            self.EntryTree.insert("", "end", iid=Name, text=Name,
-                                  values=(Entry.get("username") or "—", Updated))
+        Query = self.SearchText.get()
+        Rows = EntryRows(self.Vault, Query, self.SortColumn, self.SortDescending)
+        Names = [Row["name"] for Row in Rows]
+        for Row in Rows:
+            Health = "ok" if Row["health"] == 0 else f"{Row['health']} issue(s)"
+            self.EntryTree.insert("", "end", iid=Row["name"], text=Row["name"],
+                                  values=(Row["username"], Health, Row["updated"][:10]))
+
+        Summary = VaultSummary(self.Vault, Query)
+        self.ListSummaryText.set(
+            f"{Summary['shown']} shown • {Summary['total']} total • "
+            f"{Summary['needs_work']} need work"
+        )
+        self.UpdateSortHeadings()
         if Selected in Names:
             self.EntryTree.selection_set(Selected)
             self.EntryTree.focus(Selected)
@@ -404,7 +490,28 @@ class P00PWindow(Tk.Tk):
             self.ShowDetails(None)
         self.UpdateControls()
 
+    def ChangeSort(self, Column):
+        if self.SortColumn == Column:
+            self.SortDescending = not self.SortDescending
+        else:
+            self.SortColumn = Column
+            self.SortDescending = Column == "updated"
+        self.RefreshList()
+
+    def UpdateSortHeadings(self):
+        Labels = {
+            "name": ("#0", "name"),
+            "username": ("username", "username"),
+            "health": ("health", "health"),
+            "updated": ("updated", "updated"),
+        }
+        Arrow = " ▼" if self.SortDescending else " ▲"
+        for Column, (TreeColumn, Label) in Labels.items():
+            Suffix = Arrow if Column == self.SortColumn else ""
+            self.EntryTree.heading(TreeColumn, text=Label + Suffix)
+
     def OnSelection(self, _Event=None):
+        self.CancelRevealTimer()
         Selection = self.EntryTree.selection()
         self.SelectedName = Selection[0] if Selection else None
         self.PasswordVisible = False
@@ -413,17 +520,20 @@ class P00PWindow(Tk.Tk):
 
     def ShowDetails(self, Name):
         if not Name or self.Vault is None or Name not in self.Vault["entries"]:
-            Values = ("—", "—", "—", "—")
+            Values = ("—", "—", "—", "—", "—")
             Notes = "pick a fake login from the list"
         else:
             Entry = self.Vault["entries"][Name]
             Password = Entry.get("password", "")
-            VisiblePassword = Password if self.PasswordVisible else "•" * max(8, min(len(Password), 24))
+            VisiblePassword = Password if self.PasswordVisible else PasswordMask(Password)
+            IssueCount = EntryIssueCounts(self.Vault).get(Name, 0)
+            Health = "looks ok" if IssueCount == 0 else f"{IssueCount} basic issue(s)"
             Values = (Name, Entry.get("username") or "—", VisiblePassword,
-                      Entry.get("updated_at") or "unknown")
+                      Entry.get("updated_at") or "unknown", Health)
             Notes = Entry.get("notes") or "no notes"
         for Widget, Value in zip(
-            (self.NameValue, self.UsernameValue, self.PasswordValue, self.UpdatedValue), Values
+            (self.NameValue, self.UsernameValue, self.PasswordValue, self.UpdatedValue,
+             self.HealthValue), Values
         ):
             Widget.configure(text=Value)
         self.NotesText.configure(state="normal")
@@ -436,7 +546,8 @@ class P00PWindow(Tk.Tk):
         HasVault = self.Vault is not None
         HasSelection = HasVault and self.SelectedName in self.Vault["entries"]
         self.AddButton.configure(state="normal" if HasVault else "disabled")
-        for Button in (self.RevealButton, self.CopyButton, self.EditButton, self.RemoveButton):
+        for Button in (self.RevealButton, self.CopyButton, self.CopyUsernameButton,
+                       self.EditButton, self.RemoveButton):
             Button.configure(state="normal" if HasSelection else "disabled")
 
     #MARK: changing the password stuffs
@@ -483,6 +594,7 @@ class P00PWindow(Tk.Tk):
         Data["updated_at"] = Main.CurrentTime()
         Candidate["entries"][NewName] = Data
         if self.SaveCandidate(Candidate, f"updated {NewName!r}"):
+            self.CancelRevealTimer()
             self.SelectedName = NewName
             self.PasswordVisible = False
             self.RefreshList()
@@ -499,6 +611,7 @@ class P00PWindow(Tk.Tk):
         )
         if not Confirmed:
             return
+        self.CancelRevealTimer()
         Candidate = Copy.deepcopy(self.Vault)
         del Candidate["entries"][Name]
         self.SelectedName = None
@@ -508,22 +621,50 @@ class P00PWindow(Tk.Tk):
     def TogglePassword(self):
         if not self.SelectedName:
             return
+        self.CancelRevealTimer()
         self.PasswordVisible = not self.PasswordVisible
         self.ShowDetails(self.SelectedName)
+        if self.PasswordVisible:
+            self.RevealAfterId = self.after(20_000, self.HidePassword)
+            self.SetStatus("password revealed for 20 seconds")
+
+    def HidePassword(self):
+        self.RevealAfterId = None
+        if self.PasswordVisible:
+            self.PasswordVisible = False
+            self.ShowDetails(self.SelectedName)
+            self.SetStatus("password hidden again")
+
+    def CancelRevealTimer(self):
+        if self.RevealAfterId is not None:
+            self.after_cancel(self.RevealAfterId)
+            self.RevealAfterId = None
 
     def CopyPassword(self):
         if not self.SelectedName or self.Vault is None:
             return
         Password = self.Vault["entries"][self.SelectedName].get("password", "")
-        self.clipboard_clear()
-        self.clipboard_append(Password)
-        self.update_idletasks()
-        self.SetStatus("password copied. clipboard clears in 20 seconds")
-        self.after(20_000, lambda: self.ClearClipboardIfSame(Password))
+        self.CopyToClipboard(Password, "password")
 
-    def ClearClipboardIfSame(self, Password):
+    def CopyUsername(self):
+        if not self.SelectedName or self.Vault is None:
+            return
+        Username = self.Vault["entries"][self.SelectedName].get("username", "")
+        if not Username:
+            self.SetStatus("this entry does not have a username")
+            return
+        self.CopyToClipboard(Username, "username")
+
+    def CopyToClipboard(self, Value, Label):
+        self.clipboard_clear()
+        self.clipboard_append(Value)
+        self.update_idletasks()
+        self.SetStatus(f"{Label} copied. clipboard clears in 20 seconds")
+        self.after(20_000, lambda: self.ClearClipboardIfSame(Value))
+
+    def ClearClipboardIfSame(self, Value):
         try:
-            if self.clipboard_get() == Password:
+            if self.clipboard_get() == Value:
                 self.clipboard_clear()
                 self.SetStatus("clipboard cleared")
         except Tk.TclError:

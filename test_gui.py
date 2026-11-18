@@ -49,6 +49,45 @@ class FilterTests(Unittest.TestCase):
         self.assertEqual(Gui.FilterEntryNames(Vault, "the password itself"), [])
 
 
+#MARK: list view stuffs
+class ListViewTests(Unittest.TestCase):
+    def testIssueCountsIncludeWeakMissingAndReusedPasswords(self):
+        Vault = ExampleVault()
+        Vault["entries"]["Moon Base"]["username"] = ""
+
+        Counts = Gui.EntryIssueCounts(Vault)
+
+        self.assertEqual(Counts["Moon Base"], 1)
+        self.assertGreater(Counts["Bad Bank"], 1)
+        self.assertEqual(Counts["Bad Bank"], Counts["Worse Bank"])
+
+    def testRowsCanSortWithoutPuttingPasswordsInTheViewModel(self):
+        Rows = Gui.EntryRows(ExampleVault(), SortColumn="name", Descending=True)
+
+        self.assertEqual([Row["name"] for Row in Rows],
+                         ["Worse Bank", "Moon Base", "Bad Bank"])
+        self.assertTrue(all("password" not in Row for Row in Rows))
+
+    def testRowsKeepSearchAndHealthSortingTogether(self):
+        Rows = Gui.EntryRows(ExampleVault(), Query="bank", SortColumn="health")
+
+        self.assertEqual({Row["name"] for Row in Rows}, {"Bad Bank", "Worse Bank"})
+        self.assertTrue(all(Row["health"] > 0 for Row in Rows))
+
+    def testVaultSummaryCountsShownAndUnhealthyEntries(self):
+        Summary = Gui.VaultSummary(ExampleVault(), Query="moon")
+
+        self.assertEqual(Summary["total"], 3)
+        self.assertEqual(Summary["shown"], 1)
+        self.assertEqual(Summary["needs_work"], 2)
+        self.assertGreater(Summary["issues"], 2)
+
+    def testPasswordMaskDoesNotLeakPasswordLength(self):
+        self.assertEqual(Gui.PasswordMask("tiny"), "•" * 12)
+        self.assertEqual(Gui.PasswordMask("ridiculously-long-fake-password"), "•" * 12)
+        self.assertEqual(Gui.PasswordMask(""), "—")
+
+
 #MARK: report stuffs
 class ReportTests(Unittest.TestCase):
     def testAuditReportsWeakAndReusedPasswordsWithoutLeakingThem(self):

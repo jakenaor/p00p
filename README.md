@@ -17,6 +17,7 @@ terminal app + custom binary format wrapped in the worlds worst security advice
 - generate random passwords using python's `secrets` stuff
 - audit weak/reused passwords without printing the actual password
 - show u the weird file guts with the `anatomy` command
+- pass every payload through a wildly unnecessary three-goblin poopline
 - use all of that from a tkinter GUI if terminal commands arent your thing
 
 ## important thing before u use it
@@ -58,9 +59,11 @@ python3 main.py gui
 ~~~
 
 that opens the password bowl window. from there u can make/open vaults, search,
-add/edit/remove entries, reveal or temporarily copy a password, run an audit,
-and inspect the file guts. copied passwords clear from the clipboard after 20
-seconds if something else hasnt replaced them already
+sort by name/user/health/date, add/edit/remove entries, copy usernames, reveal
+or temporarily copy a password, run an audit, and inspect the file guts. the
+list shows basic password-health counts without showing the password itself.
+revealed passwords hide again after 20 seconds, and copied stuff clears from
+the clipboard after 20 seconds if something else hasnt replaced it already
 
 if u want to open a specific bowl:
 
@@ -165,6 +168,12 @@ supports that stuff
 this stops casual plaintext searches. it is still **not encryption** because
 the "secret" camouflage key is literally included in the program dum dum
 
+internally, `poopline.py` makes those three tiny transformations look extremely
+official. a parcel gets handed to a JSON goblin, a trash compactor, and a toilet
+curtain. every goblin issues a size-only receipt, and the decoder performs the
+ritual backwards. this makes the code funnier and the `anatomy` report longer.
+it does **not** make the passwords harder for an attacker to recover
+
 [FORMAT.md](FORMAT.md) has the exact byte layout if u wanna see all the nerdy
 file format details
 
@@ -175,8 +184,9 @@ python3 -m unittest -v
 ~~~
 
 the project only uses python's standard library. the tests cover encoding,
-corruption checks, password generation, file permissions, GUI search/audit
-helpers, and the whole CLI workflow
+corruption checks, password generation, file permissions, GUI search/sort/audit
+helpers, password-safe list summaries, byte-for-byte poopline compatibility,
+and the whole CLI workflow
 
 ## credits + important legal poop
 
