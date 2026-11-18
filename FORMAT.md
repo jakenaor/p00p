@@ -6,7 +6,7 @@ magic numbers hiding in `main.py` and so future me can remember what i did lol
 all multi-byte numbers are big-endian
 
 ## the outside wrapper
-
+##
 | offset | size | thing | what it means |
 | ---: | ---: | --- | --- |
 | `0` | 5 | magic | ASCII `P00P` + a null byte |
