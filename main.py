@@ -23,6 +23,7 @@ from datetime import datetime as DateTime, timezone as Timezone
 from pathlib import Path
 
 import poopline as Poopline
+import theater as Theater
 
 
 MAGIC = b"P00P\x00"
@@ -437,6 +438,19 @@ def CommandAudit(Args):
     print("reality check: camouflage still is not encryption")
 
 
+#MARK: security theater stuffs
+def SecurityTheaterReport(FilePath):
+    Blob = ReadVaultBlob(Path(FilePath))
+    Header = ParseHeader(Blob)
+    Vault = DecodeVault(Blob)
+    Receipts = Poopline.InspectPayloadRitual(Vault, Header["salt"], CAMOUFLAGE_KEY)
+    return Theater.ScoreSecurityTheater(Vault, FilePath, Blob, Header, Receipts)
+
+
+def CommandTheater(Args):
+    print(SecurityTheaterReport(Args.vault).AsText())
+
+
 #MARK: file guts
 def CommandAnatomy(Args):
     Blob = ReadVaultBlob(Args.vault)
@@ -646,6 +660,12 @@ def BuildParser():
     )
     AddVaultArgument(AuditParser)
     AuditParser.set_defaults(handler=CommandAudit)
+
+    TheaterParser = Subparsers.add_parser(
+        "theater", help="calculate a completely fake security theater score"
+    )
+    AddVaultArgument(TheaterParser)
+    TheaterParser.set_defaults(handler=CommandTheater)
 
     AnatomyParser = Subparsers.add_parser(
         "anatomy", help="explain the vault's binary envelope"

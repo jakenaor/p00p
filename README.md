@@ -18,6 +18,7 @@ terminal app + custom binary format wrapped in the worlds worst security advice
 - audit weak/reused passwords without printing the actual password
 - show u the weird file guts with the `anatomy` command
 - pass every payload through a wildly unnecessary three-goblin poopline
+- calculate a completely fake 100-point security theater score
 - use all of that from a tkinter GUI if terminal commands arent your thing
 
 ## important thing before u use it
@@ -63,7 +64,8 @@ sort by name/user/health/date, add/edit/remove entries, copy usernames, reveal
 or temporarily copy a password, run an audit, and inspect the file guts. the
 list shows basic password-health counts without showing the password itself.
 revealed passwords hide again after 20 seconds, and copied stuff clears from
-the clipboard after 20 seconds if something else hasnt replaced it already
+the clipboard after 20 seconds if something else hasnt replaced it already.
+the `vibes` button opens the same fake applause meter as the terminal command
 
 if u want to open a specific bowl:
 
@@ -113,6 +115,9 @@ python3 main.py search moon
 # rename/remove stuff
 python3 main.py rename example.com definitely-not-a-bank.biz
 python3 main.py remove definitely-not-a-bank.biz
+
+# award applause points for dots, wrong extensions, and other serious nonsense
+python3 main.py theater
 ~~~
 
 ## more suspicious tools
@@ -151,6 +156,7 @@ something
 | `info` | shows basic file metadata + permissions |
 | `generate` / `gen` | makes a random password without storing it |
 | `audit` | finds basic password/file hygiene problems |
+| `theater` | awards a fake security-theater score out of 100 |
 | `anatomy` | shows the binary file bits + checks the file |
 | `gui` | opens the tkinter password bowl |
 
@@ -174,6 +180,12 @@ curtain. every goblin issues a size-only receipt, and the decoder performs the
 ritual backwards. this makes the code funnier and the `anatomy` report longer.
 it does **not** make the passwords harder for an attacker to recover
 
+`theater.py` takes the joke further with seven cue classes and an applause
+meter. it awards points for a hidden filename, poop extension, owner-only file
+permissions, absent plaintext strings, salt, checksum, and completed goblin
+paperwork. a perfect 100 means maximum security theater. it does not mean the
+file is secure, even a little bit
+
 [FORMAT.md](FORMAT.md) has the exact byte layout if u wanna see all the nerdy
 file format details
 
@@ -186,7 +198,7 @@ python3 -m unittest -v
 the project only uses python's standard library. the tests cover encoding,
 corruption checks, password generation, file permissions, GUI search/sort/audit
 helpers, password-safe list summaries, byte-for-byte poopline compatibility,
-and the whole CLI workflow
+security-theater scoring, and the whole CLI workflow
 
 ## credits + important legal poop
 

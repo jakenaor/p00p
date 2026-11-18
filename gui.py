@@ -232,6 +232,7 @@ class P00PWindow(Tk.Tk):
         ToolsMenu = Tk.Menu(MenuBar, tearoff=False)
         ToolsMenu.add_command(label="add fake login", command=self.AddEntry, accelerator="Cmd+Shift+N")
         ToolsMenu.add_command(label="audit bowl", command=self.ShowAudit)
+        ToolsMenu.add_command(label="security theater score", command=self.ShowTheater)
         ToolsMenu.add_command(label="file anatomy", command=self.ShowAnatomy)
         MenuBar.add_cascade(label="tools", menu=ToolsMenu)
 
@@ -369,6 +370,8 @@ class P00PWindow(Tk.Tk):
         Bar.pack(fill="x", padx=18, pady=(8, 18))
         Ttk.Label(Bar, textvariable=self.StatusText, style="Muted.TLabel").pack(side="left")
         Ttk.Button(Bar, text="audit", style="Quiet.TButton", command=self.ShowAudit).pack(
+            side="right", padx=(6, 0))
+        Ttk.Button(Bar, text="vibes", style="Quiet.TButton", command=self.ShowTheater).pack(
             side="right", padx=(6, 0))
         Ttk.Button(Bar, text="file guts", style="Quiet.TButton", command=self.ShowAnatomy).pack(
             side="right")
@@ -684,6 +687,17 @@ class P00PWindow(Tk.Tk):
         Lines.extend(("", "this only checks basic patterns.",
                       "the entire p00p format is still not real encryption."))
         TextWindow(self, "bowl audit", "\n".join(Lines))
+
+    def ShowTheater(self):
+        if self.FilePath is None:
+            MessageBox.showinfo("no bowl yet", "open a bowl before measuring its vibes", parent=self)
+            return
+        try:
+            Report = Main.SecurityTheaterReport(self.FilePath).AsText()
+        except Main.P00PError as Exc:
+            self.ShowError("the applause meter broke", Exc)
+            return
+        TextWindow(self, "security theater applause meter", Report, Monospace=True)
 
     def ShowAnatomy(self):
         if self.FilePath is None:
