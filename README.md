@@ -33,8 +33,21 @@ password manager with real authenticated encryption for passwords u care about
 
 ## how to run the thingy
 
-u need **Python 3.9 or newer**. there are no packages to install because i didnt
-feel like making u download half of the internet for one poop file
+u need **Python 3.9 or newer** for the terminal app. there are no python packages
+to install because i didnt feel like making u download half of the internet for
+one poop file
+
+the GUI also needs **Tk 8.6 or newer**. apples `/usr/bin/python3` still comes
+with ancient Tk 8.5, which draws a beautiful empty rectangle on newer macOS lol.
+if the app complains about that and u already have Homebrew:
+
+~~~sh
+brew install python-tk@3.13
+~~~
+
+then run the normal GUI command again. p00p looks for the newer Homebrew python
+and hands itself over automatically. if your good python lives somewhere weird,
+set `P00P_GUI_PYTHON=/path/to/python3` before the command
 
 these commands are for a macOS/Linux terminal:
 

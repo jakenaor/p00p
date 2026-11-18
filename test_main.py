@@ -3,6 +3,8 @@ import io as Io
 import string as String
 import tempfile as Tempfile
 import unittest as Unittest
+from types import SimpleNamespace
+from unittest import mock as Mock
 from pathlib import Path
 
 import main as Main
@@ -158,6 +160,33 @@ class CommandTests(Unittest.TestCase):
 
         self.assertIs(Args.handler, Main.CommandGui)
         self.assertEqual(Args.vault, Path(".test.poop"))
+
+    def testTkVersionsAreParsedWithoutExploding(self):
+        self.assertEqual(Main.ParseTkVersion("8.6"), (8, 6))
+        self.assertEqual(Main.ParseTkVersion("9.0.1"), (9, 0))
+        self.assertEqual(Main.ParseTkVersion("uh oh"), (0, 0))
+
+    def testOldMacTkGetsAUsefulInstallMessage(self):
+        Args = SimpleNamespace(vault=Path(".test.p00p"))
+        with Mock.patch.object(Main.Sys, "platform", "darwin"), \
+             Mock.patch.object(Main, "CurrentTkVersion", return_value=(8, 5)), \
+             Mock.patch.object(Main, "FindCompatibleGuiPython", return_value=None):
+            with self.assertRaisesRegex(Main.P00PError, "python-tk@3.13"):
+                Main.CommandGui(Args)
+
+    def testOldMacTkHandsOffToANewerPython(self):
+        Args = SimpleNamespace(vault=Path(".test.p00p"))
+        BetterPython = Path("/opt/homebrew/bin/python3.13")
+        with Mock.patch.object(Main.Sys, "platform", "darwin"), \
+             Mock.patch.object(Main, "CurrentTkVersion", return_value=(8, 5)), \
+             Mock.patch.object(Main, "FindCompatibleGuiPython", return_value=BetterPython), \
+             Mock.patch.object(Main.Os, "execv") as Exec:
+            Main.CommandGui(Args)
+
+        Exec.assert_called_once()
+        Arguments = Exec.call_args.args
+        self.assertEqual(Arguments[0], str(BetterPython))
+        self.assertEqual(Arguments[1][-3:], ("gui", "--vault", ".test.p00p"))
 
 
 if __name__ == "__main__":

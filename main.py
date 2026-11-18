@@ -17,6 +17,7 @@ import os as Os
 import secrets as Secrets
 import string as String
 import struct as Struct
+import subprocess as Subprocess
 import sys as Sys
 import tempfile as Tempfile
 import zlib as Zlib
@@ -448,7 +449,92 @@ def CommandAnatomy(Args):
 
 
 #MARK: graphical stuffs
+def ParseTkVersion(Value):
+    try:
+        Parts = str(Value).split(".")
+        return tuple(int(Part) for Part in Parts[:2])
+    except (TypeError, ValueError):
+        return (0, 0)
+
+
+def CurrentTkVersion():
+    try:
+        import tkinter as Tk
+        return ParseTkVersion(Tk.TkVersion)
+    except ImportError:
+        return (0, 0)
+
+
+def GuiPythonCandidates():
+    Candidates = []
+    CustomPython = Os.environ.get("P00P_GUI_PYTHON")
+    if CustomPython:
+        Candidates.append(Path(CustomPython).expanduser())
+
+    for Prefix in (Path("/opt/homebrew"), Path("/usr/local")):
+        Candidates.append(Prefix / "bin" / "python3")
+        for Version in ("3.15", "3.14", "3.13", "3.12", "3.11", "3.10", "3.9"):
+            Candidates.append(Prefix / "bin" / f"python{Version}")
+            Candidates.append(Prefix / "opt" / f"python@{Version}" / "libexec" / "bin" / "python3")
+
+    Seen = set()
+    for Candidate in Candidates:
+        Candidate = Path(Candidate)
+        if Candidate not in Seen:
+            Seen.add(Candidate)
+            yield Candidate
+
+
+def ProbeTkVersion(PythonPath):
+    try:
+        Result = Subprocess.run(
+            (str(PythonPath), "-c", "import tkinter as Tk; print(Tk.TkVersion)"),
+            capture_output=True,
+            text=True,
+            timeout=4,
+            check=False,
+        )
+    except (OSError, Subprocess.TimeoutExpired):
+        return (0, 0)
+    if Result.returncode != 0:
+        return (0, 0)
+    return ParseTkVersion(Result.stdout.strip())
+
+
+def FindCompatibleGuiPython():
+    CurrentPython = Path(Sys.executable).resolve()
+    for Candidate in GuiPythonCandidates():
+        try:
+            if not Candidate.is_file() or Candidate.resolve() == CurrentPython:
+                continue
+        except OSError:
+            continue
+        if ProbeTkVersion(Candidate) >= (8, 6):
+            return Candidate.resolve()
+    return None
+
+
+def GuiRuntimeError(Version):
+    VersionText = ".".join(str(Part) for Part in Version) if Version != (0, 0) else "missing"
+    return P00PError(
+        f"this python has Tk {VersionText}, but the GUI needs Tk 8.6+ on modern macOS. "
+        "install it with 'brew install python-tk@3.13', then run this command again. "
+        "u can also set P00P_GUI_PYTHON to a compatible python path"
+    )
+
+
 def CommandGui(Args):
+    TkVersion = CurrentTkVersion()
+    if Sys.platform == "darwin" and TkVersion < (8, 6):
+        BetterPython = FindCompatibleGuiPython()
+        if BetterPython is None:
+            raise GuiRuntimeError(TkVersion)
+        MainPath = Path(__file__).resolve()
+        Os.execv(
+            str(BetterPython),
+            (str(BetterPython), str(MainPath), "gui", "--vault", str(Args.vault)),
+        )
+        return
     from gui import RunGui
     RunGui(StartPath=Args.vault)
 
