@@ -98,6 +98,13 @@ revealed passwords hide again after 20 seconds, and copied stuff clears from
 the clipboard after 20 seconds if something else hasnt replaced it already.
 the add/edit window has a configurable generator and live basic health feedback
 
+the settings tab remembers one master sfx on/off switch, one master volume for
+every sound, and the crt shader toggle between launches. it also has buttons to
+test the future sound hook, clear the clipboard,
+reset app settings, and delete every entry in the open vault. delete-all asks
+first and then saves the empty vault atomically because even the giant red joke
+button should not corrupt the bowl
+
 the interface uses blocky terminal panels, a moving crt shader, a tic-80-ish
 mouse, and exactly one visible poop mascot. press `F8` if the shader needs to
 get out of the way while u debug it

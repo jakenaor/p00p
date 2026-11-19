@@ -11,7 +11,7 @@ import subprocess as Subprocess
 import sys as Sys
 from pathlib import Path
 
-from PySide6.QtCore import Property, QEvent, QObject, Qt, QTimer, QUrl, Signal, Slot
+from PySide6.QtCore import Property, QEvent, QObject, QSettings, Qt, QTimer, QUrl, Signal, Slot
 from PySide6.QtGui import QCursor, QGuiApplication
 from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtQuickControls2 import QQuickStyle
@@ -32,6 +32,7 @@ SOUND_CUES = frozenset({
     "vault_new",
     "entry_save",
     "entry_remove",
+    "delete_all",
     "generate",
     "copy",
     "reveal",
@@ -39,12 +40,30 @@ SOUND_CUES = frozenset({
     "error",
     "easter_egg",
 })
+DEFAULT_VOLUME = 70
+DEFAULT_SFX_ENABLED = True
+DEFAULT_SHADER_ENABLED = True
 
 
-def HandleSoundCue(Cue):
+def HandleSoundCue(Cue, Volume):
     # YOUR SOUND STUFF GOES HERE!! map Cue to a wav and play it without blocking qt.
-    # all the ui actions already send their little names here so u only wire it once.
+    # Volume is 0-100. all the ui actions already land here so u only wire it once.
     return None
+
+
+def ClampVolume(Value):
+    try:
+        return max(0, min(100, int(Value)))
+    except (TypeError, ValueError):
+        return DEFAULT_VOLUME
+
+
+def SettingBool(Value, Default=True):
+    if isinstance(Value, bool):
+        return Value
+    if Value is None:
+        return bool(Default)
+    return str(Value).strip().casefold() in {"1", "true", "yes", "on"}
 
 
 #MARK: shader stuffs
@@ -111,10 +130,12 @@ class VaultBackend(QObject):
     entriesChanged = Signal()
     selectionChanged = Signal()
     statusChanged = Signal()
-    soundRequested = Signal(str)
+    settingsChanged = Signal()
+    soundRequested = Signal(str, int)
 
-    def __init__(self, StartPath=None):
+    def __init__(self, StartPath=None, Settings=None):
         super().__init__()
+        self.Settings = Settings or QSettings("Hack Club", "P00P")
         self.Vault = None
         self.FilePath = None
         self.SelectedName = ""
@@ -123,6 +144,15 @@ class VaultBackend(QObject):
         self.SortDescending = False
         self.PasswordVisible = False
         self.Status = "SYS // READY"
+        self.Volume = ClampVolume(self.Settings.value("audio/volume", DEFAULT_VOLUME))
+        self.SfxEnabled = SettingBool(
+            self.Settings.value("audio/enabled", DEFAULT_SFX_ENABLED),
+            DEFAULT_SFX_ENABLED,
+        )
+        self.ShaderEnabled = SettingBool(
+            self.Settings.value("display/shader", DEFAULT_SHADER_ENABLED),
+            DEFAULT_SHADER_ENABLED,
+        )
 
         Candidate = Path(StartPath or Os.environ.get("P00P_FILE", Main.DEFAULT_VAULT))
         if Candidate.is_file():
@@ -176,8 +206,8 @@ class VaultBackend(QObject):
     def requestSound(self, Cue):
         # unknown noises get ignored instead of turning one typo into a ghost sound.
         Cue = str(Cue).strip().lower()
-        if Cue in SOUND_CUES:
-            self.soundRequested.emit(Cue)
+        if Cue in SOUND_CUES and self.SfxEnabled:
+            self.soundRequested.emit(Cue, self.Volume)
 
     def _load(self, FilePath, Quiet=False, SoundCue="vault_open"):
         try:
@@ -262,6 +292,77 @@ class VaultBackend(QObject):
     @Property(str, notify=statusChanged)
     def statusText(self):
         return self.Status
+
+    #MARK: settings stuffs
+    @Property(int, notify=settingsChanged)
+    def volume(self):
+        return self.Volume
+
+    @Property(bool, notify=settingsChanged)
+    def sfxEnabled(self):
+        return self.SfxEnabled
+
+    @Property(bool, notify=settingsChanged)
+    def shaderEnabled(self):
+        return self.ShaderEnabled
+
+    @Property(bool, notify=entriesChanged)
+    def hasEntries(self):
+        return bool(self.Vault and self.Vault.get("entries"))
+
+    @Property(str, constant=True)
+    def versionText(self):
+        return Main.PROJECT_VERSION
+
+    @Property(int, constant=True)
+    def commonPasswordCount(self):
+        return len(Main.COMMON_PASSWORDS)
+
+    @Slot(int)
+    def setVolume(self, Volume):
+        Volume = ClampVolume(Volume)
+        if Volume == self.Volume:
+            return
+        self.Volume = Volume
+        self.Settings.setValue("audio/volume", Volume)
+        self.Settings.sync()
+        self.settingsChanged.emit()
+
+    @Slot(bool)
+    def setSfxEnabled(self, Enabled):
+        Enabled = bool(Enabled)
+        if Enabled == self.SfxEnabled:
+            return
+        self.SfxEnabled = Enabled
+        self.Settings.setValue("audio/enabled", Enabled)
+        self.Settings.sync()
+        self.settingsChanged.emit()
+        # turning it on gets one proof-of-life click. turning it off stays quiet.
+        if Enabled:
+            self.requestSound("ui_click")
+
+    @Slot(bool)
+    def setShaderEnabled(self, Enabled):
+        Enabled = bool(Enabled)
+        if Enabled == self.ShaderEnabled:
+            return
+        self.ShaderEnabled = Enabled
+        self.Settings.setValue("display/shader", Enabled)
+        self.Settings.sync()
+        self.settingsChanged.emit()
+
+    @Slot()
+    def resetSettings(self):
+        # reset app knobs, not the vault. password deletion lives behind its own giant button.
+        self.Volume = DEFAULT_VOLUME
+        self.SfxEnabled = DEFAULT_SFX_ENABLED
+        self.ShaderEnabled = DEFAULT_SHADER_ENABLED
+        self.Settings.setValue("audio/volume", self.Volume)
+        self.Settings.setValue("audio/enabled", self.SfxEnabled)
+        self.Settings.setValue("display/shader", self.ShaderEnabled)
+        self.Settings.sync()
+        self.settingsChanged.emit()
+        self.requestSound("ui_click")
 
     #MARK: vault picker stuffs
     @Slot()
@@ -451,6 +552,35 @@ class VaultBackend(QObject):
         self.entriesChanged.emit()
         self.selectionChanged.emit()
 
+    @Slot(result=bool)
+    def deleteAllEntries(self):
+        if not self.Vault or not self.Vault.get("entries"):
+            return False
+        Count = len(self.Vault["entries"])
+        Answer = QMessageBox.warning(
+            None,
+            "DELETE EVERY ENTRY",
+            f"DELETE ALL {Count} ENTRIES FROM THIS VAULT?\n\nTHIS CANNOT BE UNDONE.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if Answer != QMessageBox.StandardButton.Yes:
+            return False
+        Working = Copy.deepcopy(self.Vault)
+        Working["entries"].clear()
+        Original = self.Vault
+        self.Vault = Working
+        if not self._save():
+            self.Vault = Original
+            return False
+        self.SelectedName = ""
+        self.PasswordVisible = False
+        self._set_status(f"DELETED ALL {Count} ENTRIES")
+        self.requestSound("delete_all")
+        self.entriesChanged.emit()
+        self.selectionChanged.emit()
+        return True
+
     #MARK: clipboard stuffs
     def _clear_clipboard_later(self, Text):
         def Clear():
@@ -480,6 +610,12 @@ class VaultBackend(QObject):
         self._clear_clipboard_later(Text)
         self._set_status("PASSWORD COPIED FOR 20 SECONDS")
         self.requestSound("copy")
+
+    @Slot()
+    def clearClipboard(self):
+        QGuiApplication.clipboard().clear()
+        self._set_status("CLIPBOARD CLEARED")
+        self.requestSound("hide")
 
     @Slot()
     def togglePassword(self):

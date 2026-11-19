@@ -25,7 +25,8 @@ ApplicationWindow {
     readonly property color accentHoverColor: "#d5ffad"
     readonly property color buttonTextColor: "#061007"
     readonly property color dangerColor: "#ff766d"
-    property bool shaderEnabled: true
+    readonly property bool shaderEnabled: backend.shaderEnabled
+    property int currentPage: 0 // 0 vault, 1 settings
     property bool customCursorActive: false
     property bool cursorInside: false
     property bool cursorPressed: false
@@ -289,7 +290,9 @@ ApplicationWindow {
         onActivated: editor.save()
     }
     // emergency un-crt button for debugging the ui underneath.
-    Shortcut { sequence: "F8"; onActivated: window.shaderEnabled = !window.shaderEnabled }
+    Shortcut { sequence: "F8"; onActivated: backend.setShaderEnabled(!backend.shaderEnabled) }
+    Shortcut { sequence: "Meta+,"; onActivated: window.currentPage = 1 }
+    Shortcut { sequence: "Ctrl+,"; onActivated: window.currentPage = 1 }
     Shortcut {
         sequence: "Escape"
         enabled: window.customCursorActive && !editor.visible
@@ -382,8 +385,20 @@ ApplicationWindow {
                     TerminalButton {
                         text: "VAULT"
                         Layout.fillWidth: true
-                        fillColor: window.panelHighColor
-                        labelColor: window.textColor
+                        fillColor: window.currentPage === 0
+                                   ? window.accentColor : window.panelHighColor
+                        labelColor: window.currentPage === 0
+                                    ? window.buttonTextColor : window.textColor
+                        onClicked: window.currentPage = 0
+                    }
+                    TerminalButton {
+                        text: "SETTINGS"
+                        Layout.fillWidth: true
+                        fillColor: window.currentPage === 1
+                                   ? window.accentColor : window.panelHighColor
+                        labelColor: window.currentPage === 1
+                                    ? window.buttonTextColor : window.textColor
+                        onClicked: window.currentPage = 1
                     }
                     Item { Layout.fillHeight: true }
                 }
@@ -393,6 +408,7 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 spacing: 12
+                visible: window.currentPage === 0
 
                 Rectangle {
                     Layout.fillWidth: true
@@ -707,7 +723,284 @@ ApplicationWindow {
                         }
                     }
                 }
+            }
 
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                visible: window.currentPage === 1
+                color: window.panelColor
+                border.width: 2
+                border.color: window.borderColor
+
+                ColumnLayout {
+                    anchors.fill: parent
+                    spacing: 0
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 48
+                        color: window.titleBarColor
+                        TerminalText {
+                            anchors.fill: parent
+                            anchors.leftMargin: 15
+                            text: "SYSTEM SETTINGS"
+                            color: window.buttonTextColor
+                            font.pixelSize: 16
+                            font.bold: true
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                    }
+
+                    ScrollView {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        clip: true
+                        contentWidth: availableWidth
+
+                        ColumnLayout {
+                            width: parent.width
+                            spacing: 14
+
+                            Rectangle {
+                                Layout.fillWidth: true
+                                Layout.leftMargin: 18
+                                Layout.rightMargin: 18
+                                Layout.topMargin: 18
+                                Layout.preferredHeight: 235
+                                color: window.panelHighColor
+                                border.width: 1
+                                border.color: window.borderColor
+
+                                ColumnLayout {
+                                    anchors.fill: parent
+                                    anchors.margins: 16
+                                    spacing: 12
+                                    TerminalText {
+                                        text: "AUDIO // FUTURE BEEP BOOPS"
+                                        color: window.accentColor
+                                        font.pixelSize: 12
+                                        font.bold: true
+                                    }
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        TerminalText {
+                                            text: "SFX MASTER"
+                                            color: window.mutedColor
+                                            font.pixelSize: 10
+                                        }
+                                        Item { Layout.fillWidth: true }
+                                        TerminalButton {
+                                            text: backend.sfxEnabled ? "ON" : "OFF"
+                                            fillColor: backend.sfxEnabled
+                                                       ? window.accentColor : window.panelColor
+                                            labelColor: backend.sfxEnabled
+                                                        ? window.buttonTextColor : window.textColor
+                                            onClicked: backend.setSfxEnabled(!backend.sfxEnabled)
+                                        }
+                                    }
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 12
+                                        TerminalText {
+                                            text: "MASTER VOLUME"
+                                            color: window.mutedColor
+                                            font.pixelSize: 10
+                                            Layout.preferredWidth: 125
+                                        }
+                                        Slider {
+                                            id: volumeSlider
+                                            Layout.fillWidth: true
+                                            from: 0
+                                            to: 100
+                                            stepSize: 1
+                                            value: backend.volume
+                                            enabled: backend.sfxEnabled
+                                            opacity: enabled ? 1.0 : 0.35
+                                            onMoved: backend.setVolume(Math.round(value))
+                                            background: Rectangle {
+                                                x: volumeSlider.leftPadding
+                                                y: volumeSlider.topPadding + volumeSlider.availableHeight / 2 - height / 2
+                                                width: volumeSlider.availableWidth
+                                                height: 8
+                                                color: "#020603"
+                                                border.width: 1
+                                                border.color: window.borderColor
+                                                Rectangle {
+                                                    width: volumeSlider.visualPosition * parent.width
+                                                    height: parent.height
+                                                    color: window.accentColor
+                                                }
+                                            }
+                                            handle: Rectangle {
+                                                x: volumeSlider.leftPadding
+                                                   + volumeSlider.visualPosition
+                                                   * (volumeSlider.availableWidth - width)
+                                                y: volumeSlider.topPadding
+                                                   + volumeSlider.availableHeight / 2 - height / 2
+                                                width: 18
+                                                height: 24
+                                                color: volumeSlider.pressed
+                                                       ? window.accentHoverColor : window.accentColor
+                                                border.width: 1
+                                                border.color: window.buttonTextColor
+                                            }
+                                        }
+                                        TerminalText {
+                                            text: backend.volume + "%"
+                                            opacity: backend.sfxEnabled ? 1.0 : 0.35
+                                            font.bold: true
+                                            Layout.preferredWidth: 48
+                                            horizontalAlignment: Text.AlignRight
+                                        }
+                                    }
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        Item { Layout.fillWidth: true }
+                                        TerminalButton {
+                                            text: "TEST SOUND"
+                                            enabled: backend.sfxEnabled
+                                            onClicked: backend.requestSound("ui_click")
+                                        }
+                                    }
+                                    TerminalText {
+                                        text: "ONE MASTER VOLUME CONTROLS EVERY CUE. PLAYBACK IS STILL YOUR TODO."
+                                        color: window.mutedColor
+                                        font.pixelSize: 9
+                                        wrapMode: Text.Wrap
+                                        Layout.fillWidth: true
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                Layout.fillWidth: true
+                                Layout.leftMargin: 18
+                                Layout.rightMargin: 18
+                                Layout.preferredHeight: 130
+                                color: window.panelHighColor
+                                border.width: 1
+                                border.color: window.borderColor
+
+                                ColumnLayout {
+                                    anchors.fill: parent
+                                    anchors.margins: 16
+                                    spacing: 10
+                                    TerminalText {
+                                        text: "DISPLAY // CRT CREATURE"
+                                        color: window.accentColor
+                                        font.pixelSize: 12
+                                        font.bold: true
+                                    }
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        TerminalText {
+                                            text: "CRT SHADER"
+                                            color: window.mutedColor
+                                            font.pixelSize: 10
+                                        }
+                                        Item { Layout.fillWidth: true }
+                                        TerminalButton {
+                                            text: backend.shaderEnabled ? "ENABLED" : "BYPASSED"
+                                            fillColor: backend.shaderEnabled
+                                                       ? window.accentColor : window.panelColor
+                                            labelColor: backend.shaderEnabled
+                                                        ? window.buttonTextColor : window.textColor
+                                            onClicked: backend.setShaderEnabled(!backend.shaderEnabled)
+                                        }
+                                    }
+                                    TerminalText {
+                                        text: "F8 STILL TOGGLES THIS WHEN THE SHADER GETS IN THE WAY."
+                                        color: window.mutedColor
+                                        font.pixelSize: 9
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                Layout.fillWidth: true
+                                Layout.leftMargin: 18
+                                Layout.rightMargin: 18
+                                Layout.preferredHeight: 118
+                                color: window.panelHighColor
+                                border.width: 1
+                                border.color: window.borderColor
+
+                                ColumnLayout {
+                                    anchors.fill: parent
+                                    anchors.margins: 16
+                                    TerminalText {
+                                        text: "APP GUTS"
+                                        color: window.accentColor
+                                        font.pixelSize: 12
+                                        font.bold: true
+                                    }
+                                    DetailLine { fieldName: "VERSION"; fieldValue: backend.versionText }
+                                    DetailLine {
+                                        fieldName: "BAD IDEAS"
+                                        fieldValue: backend.commonPasswordCount + " COMMON PASSWORDS LOADED"
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                Layout.fillWidth: true
+                                Layout.leftMargin: 18
+                                Layout.rightMargin: 18
+                                Layout.bottomMargin: 18
+                                Layout.preferredHeight: 175
+                                color: "#180909"
+                                border.width: 2
+                                border.color: "#6f2420"
+
+                                ColumnLayout {
+                                    anchors.fill: parent
+                                    anchors.margins: 16
+                                    spacing: 9
+                                    TerminalText {
+                                        text: "DANGER ZONE // EXTREMELY SERIOUS BUTTONS"
+                                        color: window.dangerColor
+                                        font.pixelSize: 12
+                                        font.bold: true
+                                    }
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 8
+                                        TerminalButton {
+                                            text: "CLEAR CLIPBOARD"
+                                            Layout.fillWidth: true
+                                            onClicked: backend.clearClipboard()
+                                        }
+                                        TerminalButton {
+                                            text: "RESET SETTINGS"
+                                            Layout.fillWidth: true
+                                            onClicked: backend.resetSettings()
+                                        }
+                                    }
+                                    TerminalButton {
+                                        text: "DELETE ALL VAULT ENTRIES"
+                                        Layout.fillWidth: true
+                                        enabled: backend.hasEntries
+                                        fillColor: "#3c1110"
+                                        hoverFillColor: "#5a1916"
+                                        labelColor: window.dangerColor
+                                        outlineColor: "#6f2420"
+                                        onClicked: backend.deleteAllEntries()
+                                    }
+                                    TerminalText {
+                                        text: backend.hasEntries
+                                              ? "THIS ASKS ONCE, THEN EMPTIES THE OPEN VAULT FOR REAL."
+                                              : "OPEN A NONEMPTY VAULT BEFORE THE BIG RED BUTTON WAKES UP."
+                                        color: window.mutedColor
+                                        font.pixelSize: 9
+                                        wrapMode: Text.Wrap
+                                        Layout.fillWidth: true
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
 
