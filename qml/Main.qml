@@ -165,25 +165,43 @@ ApplicationWindow {
         }
     }
 
-    component TerminalCombo: ComboBox {
+    component TerminalCombo: Control {
         id: combo
+        property var model: []
+        property int currentIndex: 0
+        readonly property string currentText: model.length > currentIndex
+                                              ? String(model[currentIndex]) : ""
+        property bool expanded: false
+        signal activated(int index)
         implicitWidth: 130
         implicitHeight: 34
+        z: expanded ? 8000 : 0
+        focus: expanded
         font.family: "Menlo"
         font.pixelSize: 11
+        Accessible.role: Accessible.ComboBox
+        Accessible.name: currentText
+        Keys.onEscapePressed: function(event) {
+            expanded = false
+            event.accepted = true
+        }
+        onActiveFocusChanged: {
+            if (!activeFocus)
+                expanded = false
+        }
         contentItem: Text {
             leftPadding: 10
             rightPadding: 28
-            text: combo.displayText.toUpperCase()
+            text: combo.currentText.toUpperCase()
             color: window.textColor
             font: combo.font
             verticalAlignment: Text.AlignVCenter
             elide: Text.ElideRight
         }
-        indicator: Text {
+        Text {
             x: combo.width - width - 9
             anchors.verticalCenter: parent.verticalCenter
-            text: "▼"
+            text: combo.expanded ? "▲" : "▼"
             color: window.accentColor
             font.family: "Menlo"
             font.pixelSize: 10
@@ -193,56 +211,69 @@ ApplicationWindow {
             border.width: 1
             border.color: window.borderColor
         }
-        popup: Popup {
-            // keep it in qml. native popups jump over the crt like cowards.
-            parent: combo
-            popupType: Popup.Item
+        MouseArea {
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: window.customCursorActive
+                         ? Qt.BlankCursor : Qt.PointingHandCursor
+            onEntered: window.setHoverCursor(1, true)
+            onExited: window.setHoverCursor(1, false)
+            onClicked: {
+                combo.expanded = !combo.expanded
+                if (combo.expanded)
+                    combo.forceActiveFocus()
+            }
+        }
+        Rectangle {
+            id: dropdown
             y: combo.height
             width: combo.width
-            height: Math.min(contentItem.contentHeight + topPadding + bottomPadding, 160)
-            padding: 1
-            z: 8000
-            background: Rectangle {
-                color: window.panelHighColor
-                border.width: 1
-                border.color: window.borderColor
-            }
-            contentItem: ListView {
+            height: Math.min(optionList.contentHeight + 2, 160)
+            visible: combo.expanded
+            color: window.panelHighColor
+            border.width: 1
+            border.color: window.borderColor
+            ListView {
+                id: optionList
+                anchors.fill: parent
+                anchors.margins: 1
                 clip: true
-                // use the real model here. qt's delegateModel became an empty mystery box.
                 model: combo.model
-                currentIndex: combo.highlightedIndex
-                delegate: ItemDelegate {
+                currentIndex: combo.currentIndex
+                delegate: Rectangle {
                     id: option
                     required property int index
                     required property string modelData
                     width: ListView.view.width
                     height: 32
-                    highlighted: hovered || combo.currentIndex === index
-                    text: modelData
-                    contentItem: Text {
+                    color: optionMouse.containsMouse || combo.currentIndex === index
+                           ? window.accentColor : window.panelHighColor
+                    Text {
+                        anchors.fill: parent
+                        anchors.leftMargin: 10
                         text: option.modelData.toUpperCase()
-                        color: option.highlighted ? window.buttonTextColor : window.textColor
+                        color: optionMouse.containsMouse || combo.currentIndex === option.index
+                               ? window.buttonTextColor : window.textColor
                         font.family: "Menlo"
                         font.pixelSize: 11
                         verticalAlignment: Text.AlignVCenter
                     }
-                    background: Rectangle {
-                        color: highlighted ? window.accentColor : window.panelHighColor
-                    }
-                    onClicked: {
-                        // custom delegates have to finish the normal combo job themselves.
-                        combo.currentIndex = index
-                        combo.activated(index)
-                        combo.popup.close()
+                    MouseArea {
+                        id: optionMouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: window.customCursorActive
+                                     ? Qt.BlankCursor : Qt.PointingHandCursor
+                        onEntered: window.setHoverCursor(1, true)
+                        onExited: window.setHoverCursor(1, false)
+                        onClicked: {
+                            combo.currentIndex = option.index
+                            combo.activated(option.index)
+                            combo.expanded = false
+                        }
                     }
                 }
             }
-        }
-        HoverHandler {
-            onHoveredChanged: window.setHoverCursor(1, hovered)
-            cursorShape: window.customCursorActive
-                         ? Qt.BlankCursor : Qt.PointingHandCursor
         }
     }
 
@@ -289,8 +320,6 @@ ApplicationWindow {
         enabled: editor.visible
         onActivated: editor.save()
     }
-    // emergency un-crt button for debugging the ui underneath.
-    Shortcut { sequence: "F8"; onActivated: backend.setShaderEnabled(!backend.shaderEnabled) }
     Shortcut { sequence: "Meta+,"; onActivated: window.currentPage = 1 }
     Shortcut { sequence: "Ctrl+,"; onActivated: window.currentPage = 1 }
     Shortcut {
@@ -767,7 +796,7 @@ ApplicationWindow {
                                 Layout.leftMargin: 18
                                 Layout.rightMargin: 18
                                 Layout.topMargin: 18
-                                Layout.preferredHeight: 235
+                                Layout.preferredHeight: 275
                                 color: window.panelHighColor
                                 border.width: 1
                                 border.color: window.borderColor
@@ -856,6 +885,48 @@ ApplicationWindow {
                                     }
                                     RowLayout {
                                         Layout.fillWidth: true
+                                        spacing: 8
+                                        TerminalText {
+                                            text: "CLIPBOARD"
+                                            color: window.mutedColor
+                                            font.pixelSize: 9
+                                        }
+                                        SpinBox {
+                                            from: 5
+                                            to: 120
+                                            value: backend.clipboardSeconds
+                                            editable: true
+                                            font.family: "Menlo"
+                                            Layout.preferredWidth: 105
+                                            textFromValue: function(value, locale) {
+                                                return value + " SEC"
+                                            }
+                                            valueFromText: function(text, locale) {
+                                                return parseInt(text)
+                                            }
+                                            onValueModified: backend.setClipboardSeconds(value)
+                                        }
+                                        TerminalText {
+                                            text: "REVEAL"
+                                            color: window.mutedColor
+                                            font.pixelSize: 9
+                                            Layout.leftMargin: 10
+                                        }
+                                        SpinBox {
+                                            from: 5
+                                            to: 120
+                                            value: backend.revealSeconds
+                                            editable: true
+                                            font.family: "Menlo"
+                                            Layout.preferredWidth: 105
+                                            textFromValue: function(value, locale) {
+                                                return value + " SEC"
+                                            }
+                                            valueFromText: function(text, locale) {
+                                                return parseInt(text)
+                                            }
+                                            onValueModified: backend.setRevealSeconds(value)
+                                        }
                                         Item { Layout.fillWidth: true }
                                         TerminalButton {
                                             text: "TEST SOUND"
@@ -873,72 +944,74 @@ ApplicationWindow {
                                 }
                             }
 
-                            Rectangle {
+                            RowLayout {
                                 Layout.fillWidth: true
                                 Layout.leftMargin: 18
                                 Layout.rightMargin: 18
                                 Layout.preferredHeight: 130
-                                color: window.panelHighColor
-                                border.width: 1
-                                border.color: window.borderColor
+                                spacing: 14
 
-                                ColumnLayout {
-                                    anchors.fill: parent
-                                    anchors.margins: 16
-                                    spacing: 10
-                                    TerminalText {
-                                        text: "DISPLAY // CRT CREATURE"
-                                        color: window.accentColor
-                                        font.pixelSize: 12
-                                        font.bold: true
-                                    }
-                                    RowLayout {
-                                        Layout.fillWidth: true
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    Layout.fillHeight: true
+                                    color: window.panelHighColor
+                                    border.width: 1
+                                    border.color: window.borderColor
+
+                                    ColumnLayout {
+                                        anchors.fill: parent
+                                        anchors.margins: 16
+                                        spacing: 10
                                         TerminalText {
-                                            text: "CRT SHADER"
-                                            color: window.mutedColor
-                                            font.pixelSize: 10
+                                            text: "DISPLAY // CRT CREATURE"
+                                            color: window.accentColor
+                                            font.pixelSize: 12
+                                            font.bold: true
                                         }
-                                        Item { Layout.fillWidth: true }
-                                        TerminalButton {
-                                            text: backend.shaderEnabled ? "ENABLED" : "BYPASSED"
-                                            fillColor: backend.shaderEnabled
-                                                       ? window.accentColor : window.panelColor
-                                            labelColor: backend.shaderEnabled
-                                                        ? window.buttonTextColor : window.textColor
-                                            onClicked: backend.setShaderEnabled(!backend.shaderEnabled)
+                                        RowLayout {
+                                            Layout.fillWidth: true
+                                            TerminalText {
+                                                text: "CRT SHADER"
+                                                color: window.mutedColor
+                                                font.pixelSize: 10
+                                            }
+                                            Item { Layout.fillWidth: true }
+                                            TerminalButton {
+                                                text: backend.shaderEnabled ? "ENABLED" : "BYPASSED"
+                                                fillColor: backend.shaderEnabled
+                                                           ? window.accentColor : window.panelColor
+                                                labelColor: backend.shaderEnabled
+                                                            ? window.buttonTextColor : window.textColor
+                                                onClicked: backend.setShaderEnabled(!backend.shaderEnabled)
+                                            }
                                         }
-                                    }
-                                    TerminalText {
-                                        text: "F8 STILL TOGGLES THIS WHEN THE SHADER GETS IN THE WAY."
-                                        color: window.mutedColor
-                                        font.pixelSize: 9
                                     }
                                 }
-                            }
 
-                            Rectangle {
-                                Layout.fillWidth: true
-                                Layout.leftMargin: 18
-                                Layout.rightMargin: 18
-                                Layout.preferredHeight: 118
-                                color: window.panelHighColor
-                                border.width: 1
-                                border.color: window.borderColor
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    Layout.fillHeight: true
+                                    color: window.panelHighColor
+                                    border.width: 1
+                                    border.color: window.borderColor
 
-                                ColumnLayout {
-                                    anchors.fill: parent
-                                    anchors.margins: 16
-                                    TerminalText {
-                                        text: "APP GUTS"
-                                        color: window.accentColor
-                                        font.pixelSize: 12
-                                        font.bold: true
-                                    }
-                                    DetailLine { fieldName: "VERSION"; fieldValue: backend.versionText }
-                                    DetailLine {
-                                        fieldName: "BAD IDEAS"
-                                        fieldValue: backend.commonPasswordCount + " COMMON PASSWORDS LOADED"
+                                    ColumnLayout {
+                                        anchors.fill: parent
+                                        anchors.margins: 16
+                                        TerminalText {
+                                            text: "APP GUTS"
+                                            color: window.accentColor
+                                            font.pixelSize: 12
+                                            font.bold: true
+                                        }
+                                        DetailLine {
+                                            fieldName: "VERSION"
+                                            fieldValue: backend.versionText
+                                        }
+                                        DetailLine {
+                                            fieldName: "BAD IDEAS"
+                                            fieldValue: backend.commonPasswordCount + " COMMON PASSWORDS LOADED"
+                                        }
                                     }
                                 }
                             }
@@ -988,9 +1061,8 @@ ApplicationWindow {
                                         onClicked: backend.deleteAllEntries()
                                     }
                                     TerminalText {
-                                        text: backend.hasEntries
-                                              ? "THIS ASKS ONCE, THEN EMPTIES THE OPEN VAULT FOR REAL."
-                                              : "OPEN A NONEMPTY VAULT BEFORE THE BIG RED BUTTON WAKES UP."
+                                        visible: backend.hasEntries
+                                        text: "THIS ASKS ONCE, THEN EMPTIES THE OPEN VAULT FOR REAL."
                                         color: window.mutedColor
                                         font.pixelSize: 9
                                         wrapMode: Text.Wrap

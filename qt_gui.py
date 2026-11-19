@@ -43,6 +43,10 @@ SOUND_CUES = frozenset({
 DEFAULT_VOLUME = 70
 DEFAULT_SFX_ENABLED = True
 DEFAULT_SHADER_ENABLED = True
+DEFAULT_CLIPBOARD_SECONDS = 20
+DEFAULT_REVEAL_SECONDS = 20
+MIN_TIMER_SECONDS = 5
+MAX_TIMER_SECONDS = 120
 
 
 def HandleSoundCue(Cue, Volume):
@@ -56,6 +60,13 @@ def ClampVolume(Value):
         return max(0, min(100, int(Value)))
     except (TypeError, ValueError):
         return DEFAULT_VOLUME
+
+
+def ClampTimer(Value, Default):
+    try:
+        return max(MIN_TIMER_SECONDS, min(MAX_TIMER_SECONDS, int(Value)))
+    except (TypeError, ValueError):
+        return Default
 
 
 def SettingBool(Value, Default=True):
@@ -153,6 +164,14 @@ class VaultBackend(QObject):
             self.Settings.value("display/shader", DEFAULT_SHADER_ENABLED),
             DEFAULT_SHADER_ENABLED,
         )
+        self.ClipboardSeconds = ClampTimer(
+            self.Settings.value("privacy/clipboard_seconds", DEFAULT_CLIPBOARD_SECONDS),
+            DEFAULT_CLIPBOARD_SECONDS,
+        )
+        self.RevealSeconds = ClampTimer(
+            self.Settings.value("privacy/reveal_seconds", DEFAULT_REVEAL_SECONDS),
+            DEFAULT_REVEAL_SECONDS,
+        )
 
         Candidate = Path(StartPath or Os.environ.get("P00P_FILE", Main.DEFAULT_VAULT))
         if Candidate.is_file():
@@ -206,7 +225,7 @@ class VaultBackend(QObject):
     def requestSound(self, Cue):
         # unknown noises get ignored instead of turning one typo into a ghost sound.
         Cue = str(Cue).strip().lower()
-        if Cue in SOUND_CUES and self.SfxEnabled:
+        if Cue in SOUND_CUES and self.SfxEnabled and self.Volume > 0:
             self.soundRequested.emit(Cue, self.Volume)
 
     def _load(self, FilePath, Quiet=False, SoundCue="vault_open"):
@@ -306,6 +325,14 @@ class VaultBackend(QObject):
     def shaderEnabled(self):
         return self.ShaderEnabled
 
+    @Property(int, notify=settingsChanged)
+    def clipboardSeconds(self):
+        return self.ClipboardSeconds
+
+    @Property(int, notify=settingsChanged)
+    def revealSeconds(self):
+        return self.RevealSeconds
+
     @Property(bool, notify=entriesChanged)
     def hasEntries(self):
         return bool(self.Vault and self.Vault.get("entries"))
@@ -351,15 +378,39 @@ class VaultBackend(QObject):
         self.Settings.sync()
         self.settingsChanged.emit()
 
+    @Slot(int)
+    def setClipboardSeconds(self, Seconds):
+        Seconds = ClampTimer(Seconds, DEFAULT_CLIPBOARD_SECONDS)
+        if Seconds == self.ClipboardSeconds:
+            return
+        self.ClipboardSeconds = Seconds
+        self.Settings.setValue("privacy/clipboard_seconds", Seconds)
+        self.Settings.sync()
+        self.settingsChanged.emit()
+
+    @Slot(int)
+    def setRevealSeconds(self, Seconds):
+        Seconds = ClampTimer(Seconds, DEFAULT_REVEAL_SECONDS)
+        if Seconds == self.RevealSeconds:
+            return
+        self.RevealSeconds = Seconds
+        self.Settings.setValue("privacy/reveal_seconds", Seconds)
+        self.Settings.sync()
+        self.settingsChanged.emit()
+
     @Slot()
     def resetSettings(self):
         # reset app knobs, not the vault. password deletion lives behind its own giant button.
         self.Volume = DEFAULT_VOLUME
         self.SfxEnabled = DEFAULT_SFX_ENABLED
         self.ShaderEnabled = DEFAULT_SHADER_ENABLED
+        self.ClipboardSeconds = DEFAULT_CLIPBOARD_SECONDS
+        self.RevealSeconds = DEFAULT_REVEAL_SECONDS
         self.Settings.setValue("audio/volume", self.Volume)
         self.Settings.setValue("audio/enabled", self.SfxEnabled)
         self.Settings.setValue("display/shader", self.ShaderEnabled)
+        self.Settings.setValue("privacy/clipboard_seconds", self.ClipboardSeconds)
+        self.Settings.setValue("privacy/reveal_seconds", self.RevealSeconds)
         self.Settings.sync()
         self.settingsChanged.emit()
         self.requestSound("ui_click")
@@ -589,7 +640,7 @@ class VaultBackend(QObject):
             if Clipboard.text() == Text:
                 Clipboard.clear()
                 self._set_status("CLIPBOARD CLEARED")
-        QTimer.singleShot(20_000, Clear)
+        QTimer.singleShot(self.ClipboardSeconds * 1000, Clear)
 
     @Slot()
     def copyUsername(self):
@@ -625,8 +676,8 @@ class VaultBackend(QObject):
         self.requestSound("reveal" if self.PasswordVisible else "hide")
         self.selectionChanged.emit()
         if self.PasswordVisible:
-            # revealed means revealed for 20 seconds, not until the app gets forgotten.
-            QTimer.singleShot(20_000, self._hide_password)
+            # revealed means revealed briefly, not until the app gets forgotten.
+            QTimer.singleShot(self.RevealSeconds * 1000, self._hide_password)
 
     def _hide_password(self):
         if self.PasswordVisible:

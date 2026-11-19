@@ -106,8 +106,7 @@ first and then saves the empty vault atomically because even the giant red joke
 button should not corrupt the bowl
 
 the interface uses blocky terminal panels, a moving crt shader, a tic-80-ish
-mouse, and exactly one visible poop mascot. press `F8` if the shader needs to
-get out of the way while u debug it
+mouse, and exactly one visible poop mascot. the shader switch lives in settings
 
 keyboard things for people who hate clicking:
 

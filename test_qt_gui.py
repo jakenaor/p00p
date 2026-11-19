@@ -55,13 +55,26 @@ class SettingsTests(Unittest.TestCase):
         Backend.setVolume(37)
         Backend.setSfxEnabled(False)
         Backend.setShaderEnabled(False)
+        Backend.setClipboardSeconds(42)
+        Backend.setRevealSeconds(31)
 
         self.assertEqual(Backend.volume, 37)
         self.assertFalse(Backend.sfxEnabled)
         self.assertFalse(Backend.shaderEnabled)
+        self.assertEqual(Backend.clipboardSeconds, 42)
+        self.assertEqual(Backend.revealSeconds, 31)
         self.assertEqual(Settings.Values["audio/volume"], 37)
         self.assertFalse(Settings.Values["audio/enabled"])
         self.assertFalse(Settings.Values["display/shader"])
+        self.assertEqual(Settings.Values["privacy/clipboard_seconds"], 42)
+        self.assertEqual(Settings.Values["privacy/reveal_seconds"], 31)
+
+        Reloaded = Gui.VaultBackend(Settings=Settings)
+        self.assertEqual(Reloaded.volume, 37)
+        self.assertFalse(Reloaded.sfxEnabled)
+        self.assertFalse(Reloaded.shaderEnabled)
+        self.assertEqual(Reloaded.clipboardSeconds, 42)
+        self.assertEqual(Reloaded.revealSeconds, 31)
 
     def testSfxMasterSwitchSilencesEveryCue(self):
         Backend = Gui.VaultBackend(Settings=MemorySettings())
@@ -82,6 +95,42 @@ class SettingsTests(Unittest.TestCase):
         Backend.setVolume(-10)
         self.assertEqual(Backend.volume, 0)
 
+    def testZeroMasterVolumeIsActuallySilent(self):
+        Backend = Gui.VaultBackend(Settings=MemorySettings())
+        Heard = []
+        Backend.soundRequested.connect(lambda Cue, Volume: Heard.append((Cue, Volume)))
+
+        Backend.setVolume(0)
+        Backend.requestSound("ui_click")
+
+        self.assertEqual(Heard, [])
+
+    def testPrivacyTimersStayInsideUsefulBounds(self):
+        Backend = Gui.VaultBackend(Settings=MemorySettings())
+
+        Backend.setClipboardSeconds(0)
+        Backend.setRevealSeconds(999)
+
+        self.assertEqual(Backend.clipboardSeconds, Gui.MIN_TIMER_SECONDS)
+        self.assertEqual(Backend.revealSeconds, Gui.MAX_TIMER_SECONDS)
+
+    def testPrivacyTimersDriveTheActualSingleShots(self):
+        Settings = MemorySettings({
+            "privacy/clipboard_seconds": 17,
+            "privacy/reveal_seconds": 29,
+        })
+        Backend = Gui.VaultBackend(Settings=Settings)
+        Backend.Vault = Main.NewVault()
+        Backend.Vault["entries"]["timer"] = {"password": "fake"}
+        Backend.SelectedName = "timer"
+
+        with Mock.patch.object(Gui.QTimer, "singleShot") as SingleShot:
+            Backend._clear_clipboard_later("fake")
+            Backend.togglePassword()
+
+        self.assertEqual(SingleShot.call_args_list[0].args[0], 17_000)
+        self.assertEqual(SingleShot.call_args_list[1].args[0], 29_000)
+
     def testResetOnlyResetsAppKnobs(self):
         Settings = MemorySettings({"audio/volume": 12, "display/shader": False})
         Backend = Gui.VaultBackend(Settings=Settings)
@@ -91,6 +140,8 @@ class SettingsTests(Unittest.TestCase):
         self.assertEqual(Backend.volume, Gui.DEFAULT_VOLUME)
         self.assertEqual(Backend.sfxEnabled, Gui.DEFAULT_SFX_ENABLED)
         self.assertEqual(Backend.shaderEnabled, Gui.DEFAULT_SHADER_ENABLED)
+        self.assertEqual(Backend.clipboardSeconds, Gui.DEFAULT_CLIPBOARD_SECONDS)
+        self.assertEqual(Backend.revealSeconds, Gui.DEFAULT_REVEAL_SECONDS)
 
     def testDeleteAllNeedsConfirmationThenSavesTheEmptyVault(self):
         with Tempfile.TemporaryDirectory() as Directory:
@@ -129,6 +180,21 @@ class SettingsTests(Unittest.TestCase):
 
         self.assertFalse(Deleted)
         self.assertIn("keep me", Backend.Vault["entries"])
+
+    def testDeleteAllRollsBackWhenTheDiskRefusesTheSave(self):
+        Backend = Gui.VaultBackend(Settings=MemorySettings())
+        Backend.Vault = Main.NewVault()
+        Backend.Vault["entries"]["survivor"] = {"password": "fake"}
+
+        with Mock.patch.object(
+            Gui.QMessageBox,
+            "warning",
+            return_value=Gui.QMessageBox.StandardButton.Yes,
+        ), Mock.patch.object(Backend, "_save", return_value=False):
+            Deleted = Backend.deleteAllEntries()
+
+        self.assertFalse(Deleted)
+        self.assertIn("survivor", Backend.Vault["entries"])
 
 
 #MARK: qt command stuffs

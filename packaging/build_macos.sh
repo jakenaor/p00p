@@ -5,6 +5,7 @@ PROJECT_DIR="${0:A:h:h}"
 PACKAGE_DIR="$PROJECT_DIR/packaging"
 DIST_DIR="$PROJECT_DIR/dist"
 BUILD_DIR="$PROJECT_DIR/build"
+STAGE_DIST="$BUILD_DIR/release-dist"
 ICONSET_DIR="$PACKAGE_DIR/P00P.iconset"
 DMG_ROOT="$BUILD_DIR/dmg-root"
 VERSION="0.2.0"
@@ -28,16 +29,31 @@ cp "$PACKAGE_DIR/P00P-1024.png" "$ICONSET_DIR/icon_512x512@2x.png"
 iconutil -c icns "$ICONSET_DIR" -o "$PACKAGE_DIR/P00P.icns"
 
 #MARK: freeze the huge qt creature
-rm -rf "$BUILD_DIR/P00P" "$DIST_DIR/P00P" "$DIST_DIR/P00P.app"
+# build beside the real app so its dock shortcut does not become a question mark for a minute.
+rm -rf "$BUILD_DIR/P00P" "$STAGE_DIST"
 "$PROJECT_DIR/.venv/bin/pyinstaller" \
     --noconfirm \
     --clean \
-    --distpath "$DIST_DIR" \
+    --distpath "$STAGE_DIST" \
     --workpath "$BUILD_DIR/P00P" \
     "$PACKAGE_DIR/P00P.spec"
 
-codesign --force --deep --sign - "$DIST_DIR/P00P.app"
-codesign --verify --deep --strict --verbose=2 "$DIST_DIR/P00P.app"
+codesign --force --deep --sign - "$STAGE_DIST/P00P.app"
+codesign --verify --deep --strict --verbose=2 "$STAGE_DIST/P00P.app"
+
+# only touch the launchable app after the replacement survived the whole build + signature.
+OLD_APP="$BUILD_DIR/P00P.previous.app"
+rm -rf "$OLD_APP"
+if [[ -d "$DIST_DIR/P00P.app" ]]; then
+    mv "$DIST_DIR/P00P.app" "$OLD_APP"
+fi
+if ! mv "$STAGE_DIST/P00P.app" "$DIST_DIR/P00P.app"; then
+    if [[ -d "$OLD_APP" ]]; then
+        mv "$OLD_APP" "$DIST_DIR/P00P.app"
+    fi
+    exit 1
+fi
+rm -rf "$OLD_APP"
 
 #MARK: app plus the applications shortcut inside one dmg
 rm -rf "$DMG_ROOT"
