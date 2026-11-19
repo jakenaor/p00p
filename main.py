@@ -490,12 +490,18 @@ def GuiPythonCandidates():
     CustomPython = Os.environ.get("P00P_GUI_PYTHON")
     if CustomPython:
         Candidates.append(Path(CustomPython).expanduser())
+    Candidates.append(Path(__file__).resolve().parent / ".venv" / "bin" / "python")
 
     for Prefix in (Path("/opt/homebrew"), Path("/usr/local")):
         Candidates.append(Prefix / "bin" / "python3")
         for Version in ("3.15", "3.14", "3.13", "3.12", "3.11", "3.10", "3.9"):
             Candidates.append(Prefix / "bin" / f"python{Version}")
             Candidates.append(Prefix / "opt" / f"python@{Version}" / "libexec" / "bin" / "python3")
+
+    FrameworkRoot = Path("/Library/Frameworks/Python.framework/Versions")
+    Candidates.append(FrameworkRoot / "Current" / "bin" / "python3")
+    for Version in ("3.15", "3.14", "3.13", "3.12", "3.11", "3.10", "3.9"):
+        Candidates.append(FrameworkRoot / Version / "bin" / "python3")
 
     Seen = set()
     for Candidate in Candidates:
@@ -521,31 +527,54 @@ def ProbeTkVersion(PythonPath):
     return ParseTkVersion(Result.stdout.strip())
 
 
+def CustomTkinterAvailable():
+    try:
+        import customtkinter
+        return bool(customtkinter)
+    except ImportError:
+        return False
+
+
+def ProbeGuiRuntime(PythonPath):
+    try:
+        Result = Subprocess.run(
+            (str(PythonPath), "-c",
+             "import tkinter as Tk, customtkinter; print(Tk.TkVersion)"),
+            capture_output=True,
+            text=True,
+            timeout=4,
+            check=False,
+        )
+    except (OSError, Subprocess.TimeoutExpired):
+        return False
+    return Result.returncode == 0 and ParseTkVersion(Result.stdout.strip()) >= (8, 6)
+
+
 def FindCompatibleGuiPython():
-    CurrentPython = Path(Sys.executable).resolve()
+    CurrentPython = Path(Sys.executable).absolute()
     for Candidate in GuiPythonCandidates():
         try:
-            if not Candidate.is_file() or Candidate.resolve() == CurrentPython:
+            if not Candidate.is_file() or Candidate.absolute() == CurrentPython:
                 continue
         except OSError:
             continue
-        if ProbeTkVersion(Candidate) >= (8, 6):
-            return Candidate.resolve()
+        if ProbeGuiRuntime(Candidate):
+            return Candidate.absolute()
     return None
 
 
 def GuiRuntimeError(Version):
     VersionText = ".".join(str(Part) for Part in Version) if Version != (0, 0) else "missing"
     return P00PError(
-        f"this python has Tk {VersionText}, but the GUI needs Tk 8.6+ on modern macOS. "
-        "install it with 'brew install python-tk@3.13', then run this command again. "
-        "u can also set P00P_GUI_PYTHON to a compatible python path"
+        f"this python has Tk {VersionText}, but the GUI needs Tk 8.6+ and CustomTkinter. "
+        "run 'python3.12 -m venv .venv' and '.venv/bin/pip install -r requirements.txt', "
+        "then launch it again"
     )
 
 
 def CommandGui(Args):
     TkVersion = CurrentTkVersion()
-    if Sys.platform == "darwin" and TkVersion < (8, 6):
+    if TkVersion < (8, 6) or not CustomTkinterAvailable():
         BetterPython = FindCompatibleGuiPython()
         if BetterPython is None:
             raise GuiRuntimeError(TkVersion)

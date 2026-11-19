@@ -35,21 +35,23 @@ password manager with real authenticated encryption for passwords u care about
 
 ## how to run the thingy
 
-u need **Python 3.9 or newer** for the terminal app. there are no python packages
-to install because i didnt feel like making u download half of the internet for
-one poop file
+u need **Python 3.9 or newer** for the terminal app. the terminal commands only
+use pythons standard library
 
-the GUI also needs **Tk 8.6 or newer**. apples `/usr/bin/python3` still comes
-with ancient Tk 8.5, which draws a beautiful empty rectangle on newer macOS lol.
-if the app complains about that and u already have Homebrew:
+the good-looking GUI uses **CustomTkinter** and needs **Tk 8.6 or newer**.
+apples `/usr/bin/python3` still comes with ancient Tk 8.5, which draws a
+beautiful empty rectangle on newer macOS lol. u do not need Homebrew. with a
+normal Python.org 3.12 install, do this once inside the project folder:
 
 ~~~sh
-brew install python-tk@3.13
+python3.12 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
 ~~~
 
-then run the normal GUI command again. p00p looks for the newer Homebrew python
-and hands itself over automatically. if your good python lives somewhere weird,
-set `P00P_GUI_PYTHON=/path/to/python3` before the command
+then run the normal GUI command below. p00p finds the project `.venv` and hands
+itself over automatically, so u dont have to activate anything. it can also
+find newer Homebrew and official Python.org installs. if your good python lives
+somewhere weird, set `P00P_GUI_PYTHON=/path/to/python3` before the command
 
 these commands are for a macOS/Linux terminal:
 
@@ -65,7 +67,13 @@ or temporarily copy a password, run an audit, and inspect the file guts. the
 list shows basic password-health counts without showing the password itself.
 revealed passwords hide again after 20 seconds, and copied stuff clears from
 the clipboard after 20 seconds if something else hasnt replaced it already.
-the `vibes` button opens the same fake applause meter as the terminal command
+the add/edit window has a configurable generator, live basic health feedback,
+and a warning before u save something hilariously weak. the `vibes` button
+opens the same fake applause meter as the terminal command
+
+the interface uses a restrained dark chocolate palette, flat panels, clean
+password-manager controls, and exactly one visible poop mascot. there are also
+two completely useless easter eggs hiding in the window. im not spoiling them
 
 if u want to open a specific bowl:
 
@@ -192,13 +200,15 @@ file format details
 ## testing it
 
 ~~~sh
-python3 -m unittest -v
+.venv/bin/python -m unittest -v
 ~~~
 
-the project only uses python's standard library. the tests cover encoding,
-corruption checks, password generation, file permissions, GUI search/sort/audit
-helpers, password-safe list summaries, byte-for-byte poopline compatibility,
-security-theater scoring, and the whole CLI workflow
+the terminal/storage guts use pythons standard library and the GUI dependency
+is pinned in `requirements.txt`. the tests cover encoding, corruption checks,
+password generation, file permissions, GUI search/sort/audit helpers,
+password-safe list summaries, dialog health/generator validation, easter-egg
+behavior, byte-for-byte poopline compatibility, security-theater scoring, and
+the whole CLI workflow
 
 ## credits + important legal poop
 

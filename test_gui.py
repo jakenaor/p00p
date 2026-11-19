@@ -1,7 +1,10 @@
 import tempfile as Tempfile
 import unittest as Unittest
+from types import SimpleNamespace
+from unittest import mock as Mock
 from pathlib import Path
 
+import ctk_gui as ModernGui
 import gui as Gui
 import main as Main
 
@@ -86,6 +89,86 @@ class ListViewTests(Unittest.TestCase):
         self.assertEqual(Gui.PasswordMask("tiny"), "•" * 12)
         self.assertEqual(Gui.PasswordMask("ridiculously-long-fake-password"), "•" * 12)
         self.assertEqual(Gui.PasswordMask(""), "—")
+
+
+#MARK: entry dialog helper stuffs
+class DialogHelperTests(Unittest.TestCase):
+    def testBlankPasswordHasAQuietStartingMessage(self):
+        Summary = Gui.PasswordHealthSummary("")
+
+        self.assertFalse(Summary["healthy"])
+        self.assertEqual(Summary["issues"], ())
+        self.assertEqual(Summary["text"], "no fake password yet")
+
+    def testWeakPasswordSummaryListsIssuesWithoutRepeatingPassword(self):
+        Summary = Gui.PasswordHealthSummary("hunter2")
+
+        self.assertFalse(Summary["healthy"])
+        self.assertGreater(len(Summary["issues"]), 1)
+        self.assertNotIn("hunter2", Summary["text"].casefold())
+
+    def testHealthyPasswordGetsTheGoodMessage(self):
+        Summary = Gui.PasswordHealthSummary("Good-Fake-Password-123!")
+
+        self.assertTrue(Summary["healthy"])
+        self.assertEqual(Summary["issues"], ())
+        self.assertIn("looks surprisingly decent", Summary["text"])
+
+    def testGeneratorLengthAcceptsStringsAndRejectsNonsense(self):
+        self.assertEqual(Gui.GeneratorLength("24"), 24)
+        with self.assertRaisesRegex(Main.P00PError, "whole number"):
+            Gui.GeneratorLength("twenty four")
+        with self.assertRaisesRegex(Main.P00PError, "12-256"):
+            Gui.GeneratorLength("999")
+
+
+#MARK: easter egg stuffs
+class EasterEggTests(Unittest.TestCase):
+    def testSequenceLatchOnlyOpensAfterTheWholePattern(self):
+        Latch = Gui.SequenceLatch(("Up", "Down", "b", "a"))
+
+        Results = [Latch.Feed(Key) for Key in ("Up", "Down", "b", "a")]
+
+        self.assertEqual(Results, [False, False, False, True])
+
+    def testSequenceLatchResetsAndCanBeUsedAgain(self):
+        Latch = Gui.SequenceLatch(("a", "b", "a"))
+
+        self.assertFalse(Latch.Feed("a"))
+        self.assertFalse(Latch.Feed("wrong"))
+        self.assertFalse(Latch.Feed("a"))
+        self.assertFalse(Latch.Feed("b"))
+        self.assertTrue(Latch.Feed("a"))
+        self.assertFalse(Latch.Feed("a"))
+
+    def testMascotOpensGoldenPoopAfterExactlyFiveClicks(self):
+        Window = SimpleNamespace(MascotClicks=0, SetStatus=Mock.Mock())
+
+        with Mock.patch.object(ModernGui, "ModernSecretWindow") as SecretWindow:
+            for _ in range(4):
+                ModernGui.ModernP00PWindow.OnMascotClick(Window)
+            SecretWindow.assert_not_called()
+
+            ModernGui.ModernP00PWindow.OnMascotClick(Window)
+
+        SecretWindow.assert_called_once()
+        self.assertEqual(SecretWindow.call_args.args[1], "Golden poop discovered")
+        self.assertEqual(Window.MascotClicks, 0)
+        Window.SetStatus.assert_called_once_with("Easter egg found: golden poop")
+
+    def testKonamiSequenceOpensSewerMode(self):
+        Latch = Mock.Mock()
+        Latch.Feed.return_value = True
+        Window = SimpleNamespace(SecretSequence=Latch, SetStatus=Mock.Mock())
+        Event = SimpleNamespace(keysym="a")
+
+        with Mock.patch.object(ModernGui, "ModernSecretWindow") as SecretWindow:
+            ModernGui.ModernP00PWindow.OnSecretKey(Window, Event)
+
+        Latch.Feed.assert_called_once_with("a")
+        SecretWindow.assert_called_once()
+        self.assertEqual(SecretWindow.call_args.args[1], "Sewer mode unlocked")
+        Window.SetStatus.assert_called_once_with("Secret sewer mode unlocked")
 
 
 #MARK: report stuffs

@@ -166,12 +166,24 @@ class CommandTests(Unittest.TestCase):
         self.assertEqual(Main.ParseTkVersion("9.0.1"), (9, 0))
         self.assertEqual(Main.ParseTkVersion("uh oh"), (0, 0))
 
+    def testGuiCandidatesIncludeTheOfficialMacPythonInstaller(self):
+        Candidates = tuple(Main.GuiPythonCandidates())
+
+        self.assertEqual(
+            Candidates[0],
+            Path(Main.__file__).resolve().parent / ".venv" / "bin" / "python",
+        )
+        self.assertIn(
+            Path("/Library/Frameworks/Python.framework/Versions/3.12/bin/python3"),
+            Candidates,
+        )
+
     def testOldMacTkGetsAUsefulInstallMessage(self):
         Args = SimpleNamespace(vault=Path(".test.p00p"))
         with Mock.patch.object(Main.Sys, "platform", "darwin"), \
              Mock.patch.object(Main, "CurrentTkVersion", return_value=(8, 5)), \
              Mock.patch.object(Main, "FindCompatibleGuiPython", return_value=None):
-            with self.assertRaisesRegex(Main.P00PError, "python-tk@3.13"):
+            with self.assertRaisesRegex(Main.P00PError, "requirements.txt"):
                 Main.CommandGui(Args)
 
     def testOldMacTkHandsOffToANewerPython(self):
