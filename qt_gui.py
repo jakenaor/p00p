@@ -10,8 +10,8 @@ import subprocess as Subprocess
 import sys as Sys
 from pathlib import Path
 
-from PySide6.QtCore import Property, QObject, QTimer, QUrl, Signal, Slot
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtCore import Property, QEvent, QObject, Qt, QTimer, QUrl, Signal, Slot
+from PySide6.QtGui import QCursor, QGuiApplication
 from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtQuickControls2 import QQuickStyle
 from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
@@ -430,6 +430,49 @@ class VaultBackend(QObject):
             self.PasswordVisible = False
             self.selectionChanged.emit()
 
+    @Slot(bool)
+    def setCustomCursorActive(self, Active):
+        if hasattr(self, "CursorFilter"):
+            self.CursorFilter.setActive(bool(Active))
+
+
+class CursorEventFilter(QObject):
+    def __init__(self, Window):
+        super().__init__(Window)
+        self.Window = Window
+
+    def setActive(self, Active):
+        if Active and bool(self.Window.property("cursorInside")):
+            self.Window.setCursor(QCursor(Qt.CursorShape.BlankCursor))
+        else:
+            self.Window.unsetCursor()
+
+    def _move_pointer(self, Event):
+        Position = Event.position()
+        self.Window.setProperty("cursorX", Position.x())
+        self.Window.setProperty("cursorY", Position.y())
+        self.Window.setProperty("cursorInside", True)
+
+    def eventFilter(self, Watched, Event):
+        EventType = Event.type()
+        if EventType == QEvent.Type.MouseButtonPress:
+            self._move_pointer(Event)
+            self.Window.setProperty("customCursorActive", True)
+            self.Window.setProperty("cursorPressed", True)
+        elif EventType == QEvent.Type.MouseButtonRelease:
+            self._move_pointer(Event)
+            self.Window.setProperty("cursorPressed", False)
+        elif EventType == QEvent.Type.MouseMove:
+            self._move_pointer(Event)
+        elif EventType == QEvent.Type.Enter:
+            self.Window.setProperty("cursorInside", True)
+            self.setActive(bool(self.Window.property("customCursorActive")))
+        elif EventType == QEvent.Type.Leave:
+            self.Window.setProperty("cursorInside", False)
+            self.Window.setProperty("cursorPressed", False)
+            self.Window.unsetCursor()
+        return super().eventFilter(Watched, Event)
+
 
 def RunQtGui(StartPath=None):
     CompileShaders()
@@ -444,6 +487,9 @@ def RunQtGui(StartPath=None):
     Engine.load(QUrl.fromLocalFile(str(QML_FILE)))
     if not Engine.rootObjects():
         return 1
+    RootWindow = Engine.rootObjects()[0]
+    Backend.CursorFilter = CursorEventFilter(RootWindow)
+    RootWindow.installEventFilter(Backend.CursorFilter)
     return App.exec()
 
 

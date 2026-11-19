@@ -25,6 +25,21 @@ ApplicationWindow {
     readonly property color buttonTextColor: "#061007"
     readonly property color dangerColor: "#ff766d"
     property bool shaderEnabled: true
+    property bool customCursorActive: false
+    property bool cursorInside: false
+    property bool cursorPressed: false
+    property real cursorX: width / 2
+    property real cursorY: height / 2
+    property int customCursorMode: 0 // 0 arrow, 1 hand, 2 ibeam
+
+    onCustomCursorActiveChanged: backend.setCustomCursorActive(customCursorActive)
+
+    function setHoverCursor(mode, hovering) {
+        if (hovering)
+            customCursorMode = mode
+        else if (customCursorMode === mode)
+            customCursorMode = 0
+    }
 
     component TerminalText: Text {
         color: window.textColor
@@ -60,7 +75,11 @@ ApplicationWindow {
             verticalAlignment: Text.AlignVCenter
             elide: Text.ElideRight
         }
-        HoverHandler { cursorShape: Qt.PointingHandCursor }
+        HoverHandler {
+            onHoveredChanged: window.setHoverCursor(1, hovered)
+            cursorShape: window.customCursorActive
+                         ? Qt.BlankCursor : Qt.PointingHandCursor
+        }
     }
 
     component TerminalField: TextField {
@@ -79,6 +98,11 @@ ApplicationWindow {
             border.width: field.activeFocus ? 2 : 1
             border.color: field.activeFocus ? window.accentColor : window.borderColor
         }
+        HoverHandler {
+            onHoveredChanged: window.setHoverCursor(2, hovered)
+            cursorShape: window.customCursorActive
+                         ? Qt.BlankCursor : Qt.IBeamCursor
+        }
     }
 
     component TerminalArea: TextArea {
@@ -95,6 +119,11 @@ ApplicationWindow {
             color: window.panelHighColor
             border.width: area.activeFocus ? 2 : 1
             border.color: area.activeFocus ? window.accentColor : window.borderColor
+        }
+        HoverHandler {
+            onHoveredChanged: window.setHoverCursor(2, hovered)
+            cursorShape: window.customCursorActive
+                         ? Qt.BlankCursor : Qt.IBeamCursor
         }
     }
 
@@ -157,6 +186,11 @@ ApplicationWindow {
                 currentIndex: combo.highlightedIndex
             }
         }
+        HoverHandler {
+            onHoveredChanged: window.setHoverCursor(1, hovered)
+            cursorShape: window.customCursorActive
+                         ? Qt.BlankCursor : Qt.PointingHandCursor
+        }
     }
 
     component DetailLine: RowLayout {
@@ -183,6 +217,11 @@ ApplicationWindow {
     Shortcut { sequence: "Ctrl+Shift+N"; onActivated: editor.openNew() }
     Shortcut { sequence: "Meta+Shift+N"; onActivated: editor.openNew() }
     Shortcut { sequence: "F8"; onActivated: window.shaderEnabled = !window.shaderEnabled }
+    Shortcut {
+        sequence: "Escape"
+        enabled: window.customCursorActive && !editor.visible
+        onActivated: window.customCursorActive = false
+    }
 
     Item {
         id: uiRoot
@@ -205,6 +244,13 @@ ApplicationWindow {
                 loops: Animation.Infinite
                 running: window.shaderEnabled
             }
+        }
+
+        HoverHandler {
+            id: cursorTracker
+            acceptedDevices: PointerDevice.Mouse
+            cursorShape: window.customCursorActive
+                         ? Qt.BlankCursor : Qt.ArrowCursor
         }
 
         Rectangle {
@@ -457,7 +503,11 @@ ApplicationWindow {
                                     }
                                     MouseArea {
                                         anchors.fill: parent
-                                        cursorShape: Qt.PointingHandCursor
+                                        hoverEnabled: true
+                                        cursorShape: window.customCursorActive
+                                                     ? Qt.BlankCursor : Qt.PointingHandCursor
+                                        onEntered: window.setHoverCursor(1, true)
+                                        onExited: window.setHoverCursor(1, false)
                                         onClicked: backend.selectEntry(modelData.name)
                                         onDoubleClicked: {
                                             backend.selectEntry(modelData.name)
@@ -582,6 +632,85 @@ ApplicationWindow {
                     color: window.mutedColor
                     font.pixelSize: 9
                     Layout.leftMargin: 3
+                }
+            }
+        }
+
+        Item {
+            id: customCursor
+            z: 9999
+            visible: window.customCursorActive && window.cursorInside
+            readonly property int hotspotX: window.customCursorMode === 1 ? 12
+                                              : window.customCursorMode === 2 ? 8 : 0
+            readonly property int hotspotY: window.customCursorMode === 2 ? 12 : 0
+            x: Math.round(window.cursorX - uiRoot.x) - hotspotX
+            y: Math.round(window.cursorY - uiRoot.y) - hotspotY
+            width: 32
+            height: 32
+
+            Canvas {
+                anchors.fill: parent
+                antialiasing: false
+                readonly property int pixelSize: 4
+                readonly property var arrowPixels: [
+                    "ff......",
+                    "fcf.....",
+                    "fccf....",
+                    "fcccf...",
+                    "fccccf..",
+                    "fcccf...",
+                    "fcfccf..",
+                    ".f.fcf.."
+                ]
+                readonly property var handPixels: [
+                    "...f....",
+                    "..fcf...",
+                    "..fcff..",
+                    ".ffcccf.",
+                    "fcfccccf",
+                    ".fcccccf",
+                    "..fcccf.",
+                    "...fff.."
+                ]
+                readonly property var pressedHandPixels: [
+                    "........",
+                    "...f....",
+                    "..fcff..",
+                    ".ffcccf.",
+                    "fcfccccf",
+                    ".fcccccf",
+                    "..fcccf.",
+                    "...fff.."
+                ]
+                readonly property var ibeamPixels: [
+                    ".fff....",
+                    "fcccf...",
+                    ".fcf....",
+                    ".fcf....",
+                    ".fcf....",
+                    ".fcf....",
+                    "fcccf...",
+                    ".fff...."
+                ]
+                readonly property var pixels: window.customCursorMode === 1
+                    ? (window.cursorPressed ? pressedHandPixels : handPixels)
+                    : window.customCursorMode === 2 ? ibeamPixels : arrowPixels
+
+                onPixelsChanged: requestPaint()
+
+                onPaint: {
+                    var context = getContext("2d")
+                    context.clearRect(0, 0, width, height)
+                    for (var row = 0; row < pixels.length; ++row) {
+                        for (var column = 0; column < pixels[row].length; ++column) {
+                            var pixel = pixels[row][column]
+                            if (pixel === ".")
+                                continue
+                            context.fillStyle = pixel === "f" ? "#333c57" : "#f4f4f4"
+                            context.fillRect(column * pixelSize, row * pixelSize,
+                                             pixelSize, pixelSize)
+                        }
+                    }
                 }
             }
         }
