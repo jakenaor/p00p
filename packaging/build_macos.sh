@@ -11,6 +11,7 @@ VERSION="0.2.0"
 
 cd "$PROJECT_DIR"
 
+#MARK: icon thingies
 "$PROJECT_DIR/.venv/bin/python" "$PACKAGE_DIR/make_icon.py"
 mkdir -p "$ICONSET_DIR"
 
@@ -26,6 +27,7 @@ sips -z 512 512 "$PACKAGE_DIR/P00P-1024.png" --out "$ICONSET_DIR/icon_512x512.pn
 cp "$PACKAGE_DIR/P00P-1024.png" "$ICONSET_DIR/icon_512x512@2x.png"
 iconutil -c icns "$ICONSET_DIR" -o "$PACKAGE_DIR/P00P.icns"
 
+#MARK: freeze the huge qt creature
 rm -rf "$BUILD_DIR/P00P" "$DIST_DIR/P00P" "$DIST_DIR/P00P.app"
 "$PROJECT_DIR/.venv/bin/pyinstaller" \
     --noconfirm \
@@ -37,6 +39,7 @@ rm -rf "$BUILD_DIR/P00P" "$DIST_DIR/P00P" "$DIST_DIR/P00P.app"
 codesign --force --deep --sign - "$DIST_DIR/P00P.app"
 codesign --verify --deep --strict --verbose=2 "$DIST_DIR/P00P.app"
 
+#MARK: app plus the applications shortcut inside one dmg
 rm -rf "$DMG_ROOT"
 mkdir -p "$DMG_ROOT"
 cp -R "$DIST_DIR/P00P.app" "$DMG_ROOT/P00P.app"

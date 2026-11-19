@@ -6,6 +6,7 @@ from pathlib import Path
 PROJECT = Path(SPECPATH).resolve().parent
 ICON = PROJECT / "packaging" / "P00P.icns"
 
+#MARK: collect the python and qml guts
 a = Analysis(
     [str(PROJECT / "qt_gui.py")],
     pathex=[str(PROJECT)],
@@ -21,6 +22,7 @@ a = Analysis(
 )
 pyz = PYZ(a.pure)
 
+#MARK: make the arm mac thingy
 exe = EXE(
     pyz,
     a.scripts,
@@ -49,6 +51,7 @@ collect = COLLECT(
     name="P00P",
 )
 
+#MARK: wrap it in the clickable app rectangle
 app = BUNDLE(
     collect,
     name="P00P.app",

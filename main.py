@@ -26,6 +26,7 @@ from pathlib import Path
 
 MAGIC = b"P00P\x00"
 VERSION = 1
+# header = magic + version + salt + payload size. checksum gets glued on the end.
 SALT_SIZE = 16
 DIGEST_SIZE = 16
 DEFAULT_VAULT = ".passwords.p00p"
@@ -67,22 +68,26 @@ def NewVault():
 
 #MARK: hiding the poops
 def Camouflage(Data, Salt):
-    # looks random enough to grep. it is still not encryption dum dum.
+    # looks random enough to grep.
     Stream = Hashlib.shake_256(CAMOUFLAGE_KEY + Salt).digest(len(Data))
     return bytes(Left ^ Right for Left, Right in zip(Data, Stream))
 
 
 def EncodeVault(Vault, Salt=None):
+    # reject cursed shapes before they become a cursed file forever.
     ValidateVault(Vault)
     Salt = Salt or Secrets.token_bytes(SALT_SIZE)
+    # sorted compact json makes the same vault predictable before the random salt touches it.
     Raw = Json.dumps(Vault, separators=(",", ":"), sort_keys=True).encode("utf-8")
     Payload = Camouflage(Zlib.compress(Raw, level=9), Salt)
     Header = MAGIC + bytes([VERSION]) + Salt + Struct.pack(">I", len(Payload))
+    # this catches damage and tampering. it does not magically make this encryption.
     Digest = Hashlib.sha256(Header + Payload).digest()[:DIGEST_SIZE]
     return Header + Payload + Digest
 
 
 def DecodeVault(Blob):
+    # check every boundary before slicing so half a file cannot pretend to be a vault.
     MinimumSize = len(MAGIC) + 1 + SALT_SIZE + 4 + DIGEST_SIZE
     if len(Blob) < MinimumSize or not Blob.startswith(MAGIC):
         raise P00PError("that is not a valid .p00p file")
@@ -104,6 +109,7 @@ def DecodeVault(Blob):
     Payload = Blob[Cursor : Cursor + PayloadSize]
     Digest = Blob[-DIGEST_SIZE:]
     ExpectedDigest = Hashlib.sha256(Blob[:-DIGEST_SIZE]).digest()[:DIGEST_SIZE]
+    # compare_digest avoids leaking the first wrong checksum byte through timing.
     if not Secrets.compare_digest(Digest, ExpectedDigest):
         raise P00PError("the vault is corrupted (integrity check failed)")
 
@@ -119,6 +125,7 @@ def DecodeVault(Blob):
 
 #MARK: checking the poops
 def ValidateVault(Vault):
+    # decoded json is still untrusted input until all the important shapes are checked.
     if not isinstance(Vault, dict) or Vault.get("protocol") != "p00p":
         raise P00PError("the vault has an invalid structure")
     Entries = Vault.get("entries")
@@ -134,6 +141,7 @@ def ValidateVault(Vault):
 
 #MARK: file guts
 def ParseHeader(Blob):
+    # anatomy only needs the envelope, so do not decode passwords just to count bytes.
     MinimumSize = len(MAGIC) + 1 + SALT_SIZE + 4 + DIGEST_SIZE
     if len(Blob) < MinimumSize or not Blob.startswith(MAGIC):
         raise P00PError("that is not a valid .p00p file")
@@ -177,6 +185,7 @@ def SaveVault(FilePath, Vault):
     Encoded = EncodeVault(Vault)
     TemporaryName = None
     try:
+        # write beside the real vault, fsync it, then swap it in all at once.
         with Tempfile.NamedTemporaryFile(
             mode="wb", prefix=f".{FilePath.name}.", dir=FilePath.parent, delete=False
         ) as Temporary:
@@ -185,6 +194,7 @@ def SaveVault(FilePath, Vault):
             Temporary.flush()
             Os.fsync(Temporary.fileno())
         Os.chmod(TemporaryName, 0o600)
+        # replace is atomic on the same filesystem, unlike writing over the live file.
         Os.replace(TemporaryName, FilePath)
     except OSError as Exc:
         if TemporaryName:
@@ -203,6 +213,7 @@ def NormalizeName(Name):
 
 
 def FindEntry(Entries, RequestedName):
+    # names keep their spelling but commands should not care about capitalization.
     Requested = RequestedName.casefold()
     Matches = [Name for Name in Entries if Name.casefold() == Requested]
     if not Matches:
@@ -218,14 +229,17 @@ def GeneratePassword(Length=DEFAULT_PASSWORD_LENGTH, Symbols=True):
     Groups = [String.ascii_lowercase, String.ascii_uppercase, String.digits]
     if Symbols:
         Groups.append(PASSWORD_SYMBOLS)
+    # pick one from every group first so randomness cannot accidentally skip a whole type.
     Characters = [Secrets.choice(Group) for Group in Groups]
     Alphabet = "".join(Groups)
     Characters.extend(Secrets.choice(Alphabet) for _ in range(Length - len(Characters)))
+    # shuffle those guaranteed characters so they do not always sit at the front.
     Secrets.SystemRandom().shuffle(Characters)
     return "".join(Characters)
 
 
 def PasswordIssues(Password):
+    # tiny hygiene checks for the demo. this is not zxcvbn wearing a poop hat.
     Issues = []
     if len(Password) < MIN_PASSWORD_LENGTH:
         Issues.append(f"shorter than {MIN_PASSWORD_LENGTH} characters")
@@ -260,6 +274,7 @@ def CommandAdd(Args):
     Vault = LoadVault(Args.vault)
     Entries = Vault["entries"]
     Name = NormalizeName(Args.name)
+    # case-only duplicates are still duplicates on purpose.
     Existing = next((Item for Item in Entries if Item.casefold() == Name.casefold()), None)
     if Existing and not Args.replace:
         raise P00PError(f"entry already exists: {Existing} (use --replace to update it)")
@@ -270,11 +285,13 @@ def CommandAdd(Args):
     else:
         Password = Args.password
     if Password is None:
+        # getpass keeps the terminal from echoing the password into scrollback.
         Password = Getpass.getpass("password (hidden while typing): ")
     if not Password:
         raise P00PError("password cannot be empty")
 
     if Existing and Existing != Name:
+        # replacing Example with example should rename it, not leave both behind.
         del Entries[Existing]
     Entries[Name] = {
         "username": Args.username or "",
@@ -306,6 +323,7 @@ def CommandGet(Args):
     Name = FindEntry(Entries, Args.name)
     Entry = Entries[Name]
     Password = Entry.get("password", "")
+    # a fixed-ish mask does not advertise the exact password length by default.
     VisiblePassword = Password if Args.show else ("*" * max(8, min(len(Password), 24)))
     print(f"name:     {Name}")
     print(f"username: {Entry.get('username') or '-'}")
@@ -323,6 +341,7 @@ def CommandSearch(Args):
     Entries = LoadVault(Args.vault)["entries"]
     Matches = []
     for Name, Entry in Entries.items():
+        # never search password contents. matching a secret would be a very weird leak.
         Searchable = (Name, Entry.get("username", ""), Entry.get("notes", ""))
         if any(Query in Value.casefold() for Value in Searchable):
             Matches.append(Name)
@@ -340,6 +359,7 @@ def CommandRename(Args):
     OldName = FindEntry(Entries, Args.old_name)
     NewName = NormalizeName(Args.new_name)
     Conflict = next(
+        # the old row is allowed to change capitalization without colliding with itself.
         (Name for Name in Entries if Name.casefold() == NewName.casefold() and Name != OldName),
         None,
     )
@@ -401,6 +421,7 @@ def CommandAudit(Args):
         if Issues:
             Findings += len(Issues)
             print(f"- {Name}: {'; '.join(Issues)}")
+        # hashes only group reused values in memory. the report never prints the secret.
         Fingerprint = Hashlib.sha256(Password.encode("utf-8")).hexdigest()
         Fingerprints.setdefault(Fingerprint, []).append(Name)
 
@@ -433,6 +454,7 @@ def CommandAudit(Args):
 
 #MARK: file guts
 def CommandAnatomy(Args):
+    # show the binary sandwich without dumping the decoded entry values.
     Blob = ReadVaultBlob(Args.vault)
     Header = ParseHeader(Blob)
     Vault = DecodeVault(Blob)

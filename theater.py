@@ -79,6 +79,7 @@ class PlaintextDisappearingCue(TheaterCue):
     Points = 20
 
     def Inspect(self, Context):
+        # only long strings count so tiny usernames do not match random binary by accident.
         Tokens = []
         for Name, Entry in Context.Vault.get("entries", {}).items():
             Tokens.extend((Name, Entry.get("username", ""), Entry.get("password", ""),
@@ -107,6 +108,7 @@ class ChecksumCurtainCallCue(TheaterCue):
 
     def Inspect(self, Context):
         Digest = Context.Header.get("digest", b"")
+        # checksum covers everything before itself, exactly like the real decoder.
         Expected = Hashlib.sha256(Context.Blob[:-len(Digest)]).digest()[:len(Digest)] if Digest else b""
         Passed = bool(Digest) and Digest == Expected
         Explanation = "the audience detected no accidental corruption" if Passed else "the checksum forgot its lines"
@@ -141,6 +143,7 @@ class ApplauseMeter:
         self.Possible = sum(Result.Possible for Result in self.Results)
 
     def Rating(self):
+        # first ceiling above the score wins. 100 gets the final maximum nonsense label.
         for Ceiling, Label in self.Ratings:
             if self.Score < Ceiling:
                 return Label
@@ -174,6 +177,7 @@ class CueBook:
         ))
 
     def StartShow(self, Context):
+        # generator stays lazy until ApplauseMeter freezes it into a tuple.
         return ApplauseMeter(Cue.Result(Context) for Cue in self.Cues)
 
 

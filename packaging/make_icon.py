@@ -9,7 +9,9 @@ ROOT = Path(__file__).resolve().parent
 OUTPUT = ROOT / "P00P-1024.png"
 
 
+#MARK: draw the poop square
 def Main():
+    # blocky shapes only. apple already has enough shiny rounded things.
     App = QGuiApplication.instance() or QGuiApplication(sys.argv)
     Image = QImage(1024, 1024, QImage.Format.Format_ARGB32)
     Image.fill(QColor("#030604"))

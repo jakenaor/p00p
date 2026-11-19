@@ -16,6 +16,7 @@ layout(std140, binding = 0) uniform buf {
 
 layout(binding = 1) uniform sampler2D source;
 
+//MARK: tiny fake random numbers for the monitor dust
 float hash21(vec2 point) {
     point = fract(point * vec2(123.34, 456.21));
     point += dot(point, point + 45.32);
@@ -23,6 +24,7 @@ float hash21(vec2 point) {
 }
 
 void main() {
+    // bend the corners because flat pixels are apparently not retro enough.
     vec2 centered = qt_TexCoord0 * 2.0 - 1.0;
     float radius2 = dot(centered, centered);
     vec2 warped = centered * (1.0 + ubuf.curvature * radius2);
@@ -39,7 +41,7 @@ void main() {
     float blue = texture(source, clamp(uv - chroma, 0.0, 1.0)).b;
     vec3 color = vec3(red, green, blue);
 
-    // Broad phosphor bars move from the top of the tube to the bottom.
+    // big uneven crt thingies moving down the screen instead of sideways.
     float rowPosition = uv.y * ubuf.resolution.y;
     float unevenSpacing = sin(rowPosition * 0.061) * 1.80
                         + sin(rowPosition * 0.017 + 1.4) * 3.20;
@@ -50,6 +52,7 @@ void main() {
     );
     color *= 1.0 + ubuf.scanlineStrength * scanWave;
 
+    // one faint bright bar rolls through everything for extra tube nonsense.
     float rollPosition = fract(uv.y - ubuf.time * 0.11);
     float rollBand = exp(-pow((rollPosition - 0.5) * 11.0, 2.0));
     color *= 1.0 + rollBand * 0.055;
@@ -59,6 +62,7 @@ void main() {
     ) - 0.5;
     color += noise * ubuf.noiseStrength;
 
+    // do not nuke the corners. just make the glass look a little less flat.
     vec2 edge = abs(centered);
     float vignette = 1.0 - 0.25 * smoothstep(0.65, 1.85, dot(edge, edge));
     float glassEdge = mix(

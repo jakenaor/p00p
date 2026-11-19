@@ -22,6 +22,7 @@ class PoopParcel:
         self.Receipts = tuple(Receipts)
 
     def HandToNextGoblin(self, StageName, NewCargo):
+        # receipts record shapes and sizes, never the actual password soup.
         Receipt = {
             "stage": StageName,
             "before_type": type(self.Cargo).__name__,
@@ -33,6 +34,7 @@ class PoopParcel:
 
 
 def MeasureCargo(Cargo):
+    # every stage speaks a different type, but the report wants comparable byte sizes.
     if isinstance(Cargo, bytes):
         return len(Cargo)
     if isinstance(Cargo, str):
@@ -53,6 +55,7 @@ class RitualContext:
         self.CamouflageKey = CamouflageKey
 
     def StreamFor(self, Length):
+        # same salt and key make the same stream so xor can walk both directions.
         Shaker = Hashlib.shake_256(self.CamouflageKey + self.Salt)
         return Shaker.digest(Length)
 
@@ -118,6 +121,7 @@ class RitualBook:
         Instructions = self.Directions[Direction]
         Stages = self.Stages
         if Instructions["reverse_stages"]:
+            # curtain, compactor, then json. undoing the ritual backwards matters a bit.
             Stages = tuple(reversed(Stages))
 
         Context = RitualContext(Salt, CamouflageKey)
@@ -127,6 +131,7 @@ class RitualBook:
             try:
                 NewCargo = Method(Parcel.Cargo, Context)
             except (Json.JSONDecodeError, UnicodeDecodeError, Zlib.error, TypeError) as Exc:
+                # keep the funny stage name while preserving the real exception underneath.
                 raise PooplineError(Stage.Name, Exc) from Exc
             Parcel = Parcel.HandToNextGoblin(Stage.Name, NewCargo)
         return Parcel

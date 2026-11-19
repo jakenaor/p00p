@@ -3,6 +3,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 
+// p00p terminal thingy. the shader is real. the hacker invisibility is still not.
 ApplicationWindow {
     id: window
     width: 1180
@@ -41,6 +42,7 @@ ApplicationWindow {
             customCursorMode = 0
     }
 
+    //MARK: reusable terminal thingies
     component TerminalText: Text {
         color: window.textColor
         font.family: "Menlo"
@@ -93,6 +95,7 @@ ApplicationWindow {
         font.pixelSize: 12
         leftPadding: 11
         rightPadding: 11
+        // keyboard focus still needs the custom mouse ready before the next move.
         onActiveFocusChanged: {
             if (activeFocus)
                 window.customCursorActive = true
@@ -164,6 +167,7 @@ ApplicationWindow {
             border.color: window.borderColor
         }
         popup: Popup {
+            // keep it in qml. native popups jump over the crt like cowards.
             parent: combo
             popupType: Popup.Item
             y: combo.height
@@ -178,6 +182,7 @@ ApplicationWindow {
             }
             contentItem: ListView {
                 clip: true
+                // use the real model here. qt's delegateModel became an empty mystery box.
                 model: combo.model
                 currentIndex: combo.highlightedIndex
                 delegate: ItemDelegate {
@@ -199,6 +204,7 @@ ApplicationWindow {
                         color: highlighted ? window.accentColor : window.panelHighColor
                     }
                     onClicked: {
+                        // custom delegates have to finish the normal combo job themselves.
                         combo.currentIndex = index
                         combo.activated(index)
                         combo.popup.close()
@@ -236,6 +242,7 @@ ApplicationWindow {
     Shortcut { sequences: [StandardKey.Open]; onActivated: backend.openVault() }
     Shortcut { sequence: "Ctrl+Shift+N"; onActivated: editor.openNew() }
     Shortcut { sequence: "Meta+Shift+N"; onActivated: editor.openNew() }
+    // emergency un-crt button for debugging the ui underneath.
     Shortcut { sequence: "F8"; onActivated: window.shaderEnabled = !window.shaderEnabled }
     Shortcut {
         sequence: "Escape"
@@ -243,13 +250,16 @@ ApplicationWindow {
         onActivated: window.customCursorActive = false
     }
 
+    //MARK: everything the fake crt eats
     Item {
         id: uiRoot
         anchors.fill: parent
         anchors.margins: 12
         layer.enabled: window.shaderEnabled
+        // crunchy pixels stay crunchy while the whole screen becomes one texture.
         layer.smooth: false
         layer.effect: ShaderEffect {
+            // one shader keeps every panel inside the same gross old monitor.
             property real time: 0.0
             property size resolution: Qt.size(uiRoot.width, uiRoot.height)
             property real curvature: 0.020
@@ -269,6 +279,7 @@ ApplicationWindow {
         HoverHandler {
             id: cursorTracker
             acceptedDevices: PointerDevice.Mouse
+            // text fields steal window events sometimes, so qml remembers the mouse too.
             onPointChanged: {
                 window.cursorX = point.scenePosition.x
                 window.cursorY = point.scenePosition.y
@@ -304,6 +315,7 @@ ApplicationWindow {
                     spacing: 4
 
                     Text {
+                        // apple's poop is the only poop allowed in this logo.
                         text: "💩"
                         font.family: "Apple Color Emoji"
                         font.pixelSize: 50
@@ -491,6 +503,7 @@ ApplicationWindow {
                                 clip: true
                                 spacing: 4
                                 model: backend.entries
+                                // the vault can get tall without making the whole window scroll.
                                 ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
                                 delegate: Rectangle {
                                     required property var modelData
@@ -539,6 +552,7 @@ ApplicationWindow {
                                         onExited: window.setHoverCursor(1, false)
                                         onClicked: backend.selectEntry(modelData.name)
                                         onDoubleClicked: {
+                                            // select first so editEntry reads the row that was actually clicked.
                                             backend.selectEntry(modelData.name)
                                             editor.openEdit()
                                         }
@@ -667,12 +681,14 @@ ApplicationWindow {
 
         Item {
             id: customCursor
+            // final window layer or the name field eats the mouse. yes it really tried.
             parent: window.contentItem
             z: 1000000
             visible: window.customCursorActive && window.cursorInside
             readonly property int hotspotX: window.customCursorMode === 1 ? 12
                                               : window.customCursorMode === 2 ? 8 : 0
             readonly property int hotspotY: window.customCursorMode === 2 ? 12 : 0
+            // python reports window coordinates, so this item also lives on the window.
             x: Math.round(window.cursorX) - hotspotX
             y: Math.round(window.cursorY) - hotspotY
             width: 32
@@ -682,6 +698,7 @@ ApplicationWindow {
                 anchors.fill: parent
                 antialiasing: false
                 readonly property int pixelSize: 4
+                // f is the dark outline, c is the light fill, and dots are air.
                 readonly property var arrowPixels: [
                     "ff......",
                     "fcf.....",
@@ -730,6 +747,7 @@ ApplicationWindow {
 
                 onPaint: {
                     var context = getContext("2d")
+                    // repaint the whole 8x8 sprite. tiny enough that clever caching is pointless.
                     context.clearRect(0, 0, width, height)
                     for (var row = 0; row < pixels.length; ++row) {
                         for (var column = 0; column < pixels[row].length; ++column) {
@@ -745,6 +763,7 @@ ApplicationWindow {
             }
         }
 
+    //MARK: add and edit entry thingy
     Item {
         id: editor
         anchors.fill: parent
@@ -756,11 +775,13 @@ ApplicationWindow {
         property string originalName: ""
 
         function open() {
+            // normal item visibility keeps the editor inside the crt render pass.
             visible = true
             forceActiveFocus()
         }
         function close() {
             visible = false
+            // do not leave an ibeam cursor stuck over the normal vault screen.
             window.customCursorMode = 0
         }
 
@@ -789,6 +810,7 @@ ApplicationWindow {
         }
 
         Keys.onEscapePressed: function(event) {
+            // eat escape here so the global shortcut does not also disable the cursor.
             close()
             event.accepted = true
         }
@@ -799,6 +821,7 @@ ApplicationWindow {
         }
 
         MouseArea {
+            // stop clicks from leaking through the modal into the vault behind it.
             anchors.fill: parent
             hoverEnabled: true
             cursorShape: window.customCursorActive ? Qt.BlankCursor : Qt.ArrowCursor

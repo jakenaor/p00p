@@ -25,11 +25,14 @@ SHADER_SOURCE = ROOT / "qml" / "shaders" / "crt.frag"
 SHADER_PACK = ROOT / "qml" / "shaders" / "crt.frag.qsb"
 
 
+#MARK: shader stuffs
 def CompileShaders():
+    # frozen apps already brought their shader. compiling inside the bundle is silly.
     if getattr(Sys, "frozen", False):
         if not SHADER_PACK.is_file():
             raise RuntimeError("packaged app is missing the compiled CRT shader")
         return
+    # only wake qsb when the readable shader is newer than its packed blob.
     if SHADER_PACK.is_file() and SHADER_PACK.stat().st_mtime >= SHADER_SOURCE.stat().st_mtime:
         return
     import PySide6
@@ -46,6 +49,7 @@ def CompileShaders():
         raise RuntimeError(f"CRT shader compilation failed:\n{Result.stderr or Result.stdout}")
 
 
+#MARK: password stuffs
 def PasswordMask(Password):
     return "•" * 12 if Password else "—"
 
@@ -69,6 +73,7 @@ def EntryIssueCounts(Vault):
         Counts[Name] = len(Main.PasswordIssues(Password))
         if not Entry.get("username"):
             Counts[Name] += 1
+        # fingerprints spot reuse without keeping another plaintext password list.
         Fingerprint = Hashlib.sha256(Password.encode("utf-8")).hexdigest()
         Fingerprints.setdefault(Fingerprint, []).append(Name)
     for Names in Fingerprints.values():
@@ -78,6 +83,7 @@ def EntryIssueCounts(Vault):
     return Counts
 
 
+#MARK: qml bridge thingy
 class VaultBackend(QObject):
     vaultPathChanged = Signal()
     entriesChanged = Signal()
@@ -114,6 +120,7 @@ class VaultBackend(QObject):
         Counts = self._issue_counts()
         Rows = []
         for Name, Entry in self.Vault.get("entries", {}).items():
+            # same rule as the cli: search labels and notes, never the password itself.
             Searchable = (Name, Entry.get("username", ""), Entry.get("notes", ""))
             if Query and not any(Query in str(Value).casefold() for Value in Searchable):
                 continue
@@ -128,6 +135,7 @@ class VaultBackend(QObject):
         Column = self.SortColumn if self.SortColumn in {"name", "username", "health", "updated"} else "name"
         def SortValue(Row):
             Value = Row[Column]
+            # name is the tie breaker so rows do not teleport when values match.
             return (Value.casefold() if isinstance(Value, str) else Value, Row["name"].casefold())
         return sorted(Rows, key=SortValue, reverse=self.SortDescending)
 
@@ -148,6 +156,7 @@ class VaultBackend(QObject):
             if not Quiet:
                 QMessageBox.critical(None, "VAULT ERROR", str(Exc))
             return False
+        # only replace the live ui state after the whole file survived decoding.
         self.Vault = Vault
         self.FilePath = Path(FilePath)
         Names = sorted(Vault.get("entries", {}), key=str.casefold)
@@ -221,6 +230,7 @@ class VaultBackend(QObject):
     def statusText(self):
         return self.Status
 
+    #MARK: vault picker stuffs
     @Slot()
     def newVault(self):
         Filename, _ = QFileDialog.getSaveFileName(
@@ -230,6 +240,7 @@ class VaultBackend(QObject):
         if not Filename:
             return
         FilePath = Path(Filename)
+        # the save dialog can return a naked name, so give it the stupid extension.
         if not FilePath.suffix:
             FilePath = FilePath.with_suffix(".p00p")
         Vault = Main.NewVault()
@@ -269,6 +280,7 @@ class VaultBackend(QObject):
         if self.Vault is None or Name not in self.Vault.get("entries", {}):
             return
         self.SelectedName = Name
+        # changing rows should immediately cover whatever password was revealed before.
         self.PasswordVisible = False
         self.selectionChanged.emit()
 
@@ -294,6 +306,7 @@ class VaultBackend(QObject):
             QMessageBox.warning(None, "GENERATOR ERROR", str(Exc))
             return ""
 
+    #MARK: entry stuffs
     @Slot(str, str, str, str, result=bool)
     def addEntry(self, Name, Username, Password, Notes):
         if self.Vault is None:
@@ -310,6 +323,7 @@ class VaultBackend(QObject):
         if any(Existing.casefold() == CleanName.casefold() for Existing in self.Vault["entries"]):
             QMessageBox.warning(None, "ENTRY ERROR", "AN ENTRY WITH THAT NAME ALREADY EXISTS")
             return False
+        # edit a copy first. a failed disk save should not mutate the visible vault.
         Working = Copy.deepcopy(self.Vault)
         Working["entries"][CleanName] = {
             "username": Username.strip(),
@@ -320,6 +334,7 @@ class VaultBackend(QObject):
         Original = self.Vault
         self.Vault = Working
         if not self._save():
+            # put the old bowl back if the new one never reached disk.
             self.Vault = Original
             return False
         self.SelectedName = CleanName
@@ -348,6 +363,7 @@ class VaultBackend(QObject):
         if Collision:
             QMessageBox.warning(None, "ENTRY ERROR", "AN ENTRY WITH THAT NAME ALREADY EXISTS")
             return False
+        # pop then insert also handles a real rename instead of cloning the entry.
         Working = Copy.deepcopy(self.Vault)
         Working["entries"].pop(OriginalName)
         Working["entries"][CleanName] = {
@@ -388,15 +404,18 @@ class VaultBackend(QObject):
             self.Vault = Original
             return
         Names = sorted(self.Vault["entries"], key=str.casefold)
+        # land on the first remaining row so the details panel never points at a ghost.
         self.SelectedName = Names[0] if Names else ""
         self.PasswordVisible = False
         self._set_status(f"REMOVED {RemovedName}")
         self.entriesChanged.emit()
         self.selectionChanged.emit()
 
+    #MARK: clipboard stuffs
     def _clear_clipboard_later(self, Text):
         def Clear():
             Clipboard = QGuiApplication.clipboard()
+            # do not erase something the user copied after the password.
             if Clipboard.text() == Text:
                 Clipboard.clear()
                 self._set_status("CLIPBOARD CLEARED")
@@ -427,6 +446,7 @@ class VaultBackend(QObject):
         self.PasswordVisible = not self.PasswordVisible
         self.selectionChanged.emit()
         if self.PasswordVisible:
+            # revealed means revealed for 20 seconds, not until the app gets forgotten.
             QTimer.singleShot(20_000, self._hide_password)
 
     def _hide_password(self):
@@ -440,6 +460,7 @@ class VaultBackend(QObject):
             self.CursorFilter.setActive(bool(Active))
 
 
+#MARK: fake mouse stuffs
 class CursorEventFilter(QObject):
     def __init__(self, Window):
         super().__init__(Window)
@@ -448,11 +469,13 @@ class CursorEventFilter(QObject):
 
     def setActive(self, Active):
         if Active and bool(self.Window.property("cursorInside")):
+            # blank the boring mac cursor. qml draws the chunky one over everything else.
             if not self.OverrideActive:
                 QGuiApplication.setOverrideCursor(QCursor(Qt.CursorShape.BlankCursor))
                 self.OverrideActive = True
             self.Window.setCursor(QCursor(Qt.CursorShape.BlankCursor))
         else:
+            # always restore the mac cursor when leaving or cmd-tabbing away.
             self.Window.unsetCursor()
             if self.OverrideActive:
                 QGuiApplication.restoreOverrideCursor()
@@ -467,6 +490,7 @@ class CursorEventFilter(QObject):
     def eventFilter(self, Watched, Event):
         EventType = Event.type()
         if EventType == QEvent.Type.MouseButtonPress:
+            # first click opts into the tic-80-ish cursor for this window.
             self._move_pointer(Event)
             self.Window.setProperty("customCursorActive", True)
             self.Window.setProperty("cursorPressed", True)
@@ -489,6 +513,7 @@ class CursorEventFilter(QObject):
         return super().eventFilter(Watched, Event)
 
 
+#MARK: start the app
 def RunQtGui(StartPath=None):
     CompileShaders()
     if Sys.platform == "darwin":
@@ -498,6 +523,7 @@ def RunQtGui(StartPath=None):
     App.setApplicationName("p00p weird storage")
     Engine = QQmlApplicationEngine()
     Backend = VaultBackend(StartPath=StartPath)
+    # qml gets one boring backend object instead of importing python spaghetti.
     Engine.rootContext().setContextProperty("backend", Backend)
     Engine.load(QUrl.fromLocalFile(str(QML_FILE)))
     if not Engine.rootObjects():
