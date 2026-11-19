@@ -61,7 +61,23 @@ the easy graphical version:
 python3 main.py gui
 ~~~
 
-that opens the password bowl window. from there u can make/open vaults, search,
+## making the mac app thingy
+
+if u want the actual drag-it-into-applications version instead of summoning it
+from a terminal, install the build bits and run the package script:
+
+~~~sh
+.venv/bin/python -m pip install -r requirements-build.txt
+packaging/build_macos.sh
+~~~
+
+that makes `dist/P00P.app` and an apple-silicon dmg at
+`dist/P00P-0.2.0-macOS-arm64.dmg`. the app is ad-hoc signed because i do not
+have a magic apple developer certificate in the repo. if another mac gets
+dramatic about it, right-click the app and choose open. real public releases
+would need developer-id signing + apple notarization
+
+the GUI opens the password bowl window. from there u can make/open vaults, search,
 sort by name/user/health/date, add/edit/remove entries, copy usernames, reveal
 or temporarily copy a password, run an audit, and inspect the file guts. the
 list shows basic password-health counts without showing the password itself.

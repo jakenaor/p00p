@@ -26,6 +26,10 @@ SHADER_PACK = ROOT / "qml" / "shaders" / "crt.frag.qsb"
 
 
 def CompileShaders():
+    if getattr(Sys, "frozen", False):
+        if not SHADER_PACK.is_file():
+            raise RuntimeError("packaged app is missing the compiled CRT shader")
+        return
     if SHADER_PACK.is_file() and SHADER_PACK.stat().st_mtime >= SHADER_SOURCE.stat().st_mtime:
         return
     import PySide6

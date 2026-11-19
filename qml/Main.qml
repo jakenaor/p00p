@@ -93,6 +93,10 @@ ApplicationWindow {
         font.pixelSize: 12
         leftPadding: 11
         rightPadding: 11
+        onActiveFocusChanged: {
+            if (activeFocus)
+                window.customCursorActive = true
+        }
         background: Rectangle {
             color: window.panelHighColor
             border.width: field.activeFocus ? 2 : 1
@@ -115,6 +119,10 @@ ApplicationWindow {
         font.pixelSize: 12
         wrapMode: TextEdit.Wrap
         padding: 11
+        onActiveFocusChanged: {
+            if (activeFocus)
+                window.customCursorActive = true
+        }
         background: Rectangle {
             color: window.panelHighColor
             border.width: area.activeFocus ? 2 : 1
@@ -155,25 +163,14 @@ ApplicationWindow {
             border.width: 1
             border.color: window.borderColor
         }
-        delegate: ItemDelegate {
-            width: combo.width
-            height: 32
-            contentItem: Text {
-                text: modelData.toUpperCase()
-                color: highlighted ? window.buttonTextColor : window.textColor
-                font.family: "Menlo"
-                font.pixelSize: 11
-                verticalAlignment: Text.AlignVCenter
-            }
-            background: Rectangle {
-                color: highlighted ? window.accentColor : window.panelHighColor
-            }
-        }
         popup: Popup {
+            parent: combo
+            popupType: Popup.Item
             y: combo.height
             width: combo.width
-            implicitHeight: contentItem.implicitHeight
+            height: Math.min(contentItem.contentHeight + topPadding + bottomPadding, 160)
             padding: 1
+            z: 8000
             background: Rectangle {
                 color: window.panelHighColor
                 border.width: 1
@@ -181,9 +178,32 @@ ApplicationWindow {
             }
             contentItem: ListView {
                 clip: true
-                implicitHeight: contentHeight
-                model: combo.popup.visible ? combo.delegateModel : null
+                model: combo.model
                 currentIndex: combo.highlightedIndex
+                delegate: ItemDelegate {
+                    id: option
+                    required property int index
+                    required property string modelData
+                    width: ListView.view.width
+                    height: 32
+                    highlighted: hovered || combo.currentIndex === index
+                    text: modelData
+                    contentItem: Text {
+                        text: option.modelData.toUpperCase()
+                        color: option.highlighted ? window.buttonTextColor : window.textColor
+                        font.family: "Menlo"
+                        font.pixelSize: 11
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                    background: Rectangle {
+                        color: highlighted ? window.accentColor : window.panelHighColor
+                    }
+                    onClicked: {
+                        combo.currentIndex = index
+                        combo.activated(index)
+                        combo.popup.close()
+                    }
+                }
             }
         }
         HoverHandler {
@@ -249,6 +269,15 @@ ApplicationWindow {
         HoverHandler {
             id: cursorTracker
             acceptedDevices: PointerDevice.Mouse
+            onPointChanged: {
+                window.cursorX = point.scenePosition.x
+                window.cursorY = point.scenePosition.y
+                window.cursorInside = true
+            }
+            onHoveredChanged: {
+                if (hovered)
+                    window.cursorInside = true
+            }
             cursorShape: window.customCursorActive
                          ? Qt.BlankCursor : Qt.ArrowCursor
         }
@@ -638,13 +667,14 @@ ApplicationWindow {
 
         Item {
             id: customCursor
-            z: 9999
+            parent: window.contentItem
+            z: 1000000
             visible: window.customCursorActive && window.cursorInside
             readonly property int hotspotX: window.customCursorMode === 1 ? 12
                                               : window.customCursorMode === 2 ? 8 : 0
             readonly property int hotspotY: window.customCursorMode === 2 ? 12 : 0
-            x: Math.round(window.cursorX - uiRoot.x) - hotspotX
-            y: Math.round(window.cursorY - uiRoot.y) - hotspotY
+            x: Math.round(window.cursorX) - hotspotX
+            y: Math.round(window.cursorY) - hotspotY
             width: 32
             height: 32
 
@@ -714,21 +744,25 @@ ApplicationWindow {
                 }
             }
         }
-    }
 
-    Dialog {
+    Item {
         id: editor
-        parent: Overlay.overlay
-        modal: true
-        focus: true
-        width: 570
-        height: 650
-        x: Math.round((window.width - width) / 2)
-        y: Math.round((window.height - height) / 2)
-        padding: 0
-        closePolicy: Popup.CloseOnEscape
+        anchors.fill: parent
+        z: 9000
+        visible: false
+        enabled: visible
+        focus: visible
         property bool editMode: false
         property string originalName: ""
+
+        function open() {
+            visible = true
+            forceActiveFocus()
+        }
+        function close() {
+            visible = false
+            window.customCursorMode = 0
+        }
 
         function openNew() {
             editMode = false
@@ -738,7 +772,7 @@ ApplicationWindow {
             passwordField.text = ""
             notesField.text = ""
             open()
-            nameField.forceActiveFocus()
+            Qt.callLater(function() { nameField.forceActiveFocus() })
         }
         function openEdit() {
             var entry = backend.selectedEntry()
@@ -751,125 +785,148 @@ ApplicationWindow {
             passwordField.text = entry.password
             notesField.text = entry.notes
             open()
-            nameField.forceActiveFocus()
+            Qt.callLater(function() { nameField.forceActiveFocus() })
         }
 
-        background: Rectangle {
+        Keys.onEscapePressed: function(event) {
+            close()
+            event.accepted = true
+        }
+
+        Rectangle {
+            anchors.fill: parent
+            color: "#a0000000"
+        }
+
+        MouseArea {
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: window.customCursorActive ? Qt.BlankCursor : Qt.ArrowCursor
+        }
+
+        Rectangle {
+            id: editorPanel
+            width: 570
+            height: Math.min(650, editor.height - 24)
+            anchors.centerIn: parent
             color: window.panelColor
             border.width: 2
             border.color: window.accentColor
-        }
-        contentItem: ColumnLayout {
-            spacing: 10
-            Rectangle {
-                Layout.fillWidth: true
-                Layout.preferredHeight: 46
-                color: window.titleBarColor
-                TerminalText {
-                    anchors.fill: parent
-                    anchors.leftMargin: 14
-                    text: editor.editMode ? "EDIT VAULT ENTRY" : "ADD VAULT ENTRY"
-                    color: window.buttonTextColor
-                    font.pixelSize: 16
-                    font.bold: true
-                    verticalAlignment: Text.AlignVCenter
-                }
-            }
+
             ColumnLayout {
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                Layout.leftMargin: 20
-                Layout.rightMargin: 20
-                Layout.bottomMargin: 20
-                spacing: 7
-                TerminalText { text: "NAME"; color: window.mutedColor; font.pixelSize: 9; font.bold: true }
-                TerminalField { id: nameField; Layout.fillWidth: true }
-                TerminalText { text: "USERNAME"; color: window.mutedColor; font.pixelSize: 9; font.bold: true; Layout.topMargin: 3 }
-                TerminalField { id: usernameField; Layout.fillWidth: true }
-                TerminalText { text: "PASSWORD"; color: window.mutedColor; font.pixelSize: 9; font.bold: true; Layout.topMargin: 3 }
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: 8
-                    TerminalField {
-                        id: passwordField
-                        Layout.fillWidth: true
-                        echoMode: showPassword.checked ? TextInput.Normal : TextInput.Password
-                    }
-                    TerminalButton {
-                        text: "GENERATE"
-                        fillColor: window.accentColor
-                        hoverFillColor: window.accentHoverColor
-                        labelColor: window.buttonTextColor
-                        outlineColor: window.accentColor
-                        onClicked: {
-                            var generated = backend.generatePassword(lengthBox.value, symbolBox.checked)
-                            if (generated)
-                                passwordField.text = generated
-                        }
-                    }
-                }
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: 13
-                    CheckBox { id: showPassword; text: "SHOW"; checked: false }
-                    TerminalText { text: "LENGTH"; color: window.mutedColor; font.pixelSize: 10 }
-                    SpinBox {
-                        id: lengthBox
-                        from: 12
-                        to: 256
-                        value: 24
-                        editable: true
-                        font.family: "Menlo"
-                    }
-                    CheckBox { id: symbolBox; text: "SYMBOLS"; checked: true }
-                    Item { Layout.fillWidth: true }
-                }
+                anchors.fill: parent
+                spacing: 10
                 Rectangle {
                     Layout.fillWidth: true
                     Layout.preferredHeight: 46
-                    color: window.panelHighColor
-                    border.width: 1
-                    border.color: window.borderColor
+                    color: window.titleBarColor
                     TerminalText {
                         anchors.fill: parent
-                        anchors.margins: 9
-                        text: backend.passwordHealth(passwordField.text).text
-                        color: window.accentColor
-                        font.pixelSize: 9
-                        wrapMode: Text.Wrap
+                        anchors.leftMargin: 14
+                        text: editor.editMode ? "EDIT VAULT ENTRY" : "ADD VAULT ENTRY"
+                        color: window.buttonTextColor
+                        font.pixelSize: 16
+                        font.bold: true
+                        verticalAlignment: Text.AlignVCenter
                     }
                 }
-                TerminalText { text: "NOTES"; color: window.mutedColor; font.pixelSize: 9; font.bold: true }
-                TerminalArea { id: notesField; Layout.fillWidth: true; Layout.fillHeight: true }
-                RowLayout {
+                ColumnLayout {
                     Layout.fillWidth: true
-                    Layout.topMargin: 8
-                    spacing: 8
-                    TerminalButton {
-                        text: "CANCEL"
+                    Layout.fillHeight: true
+                    Layout.leftMargin: 20
+                    Layout.rightMargin: 20
+                    Layout.bottomMargin: 20
+                    spacing: 7
+                    TerminalText { text: "NAME"; color: window.mutedColor; font.pixelSize: 9; font.bold: true }
+                    TerminalField { id: nameField; Layout.fillWidth: true }
+                    TerminalText { text: "USERNAME"; color: window.mutedColor; font.pixelSize: 9; font.bold: true; Layout.topMargin: 3 }
+                    TerminalField { id: usernameField; Layout.fillWidth: true }
+                    TerminalText { text: "PASSWORD"; color: window.mutedColor; font.pixelSize: 9; font.bold: true; Layout.topMargin: 3 }
+                    RowLayout {
                         Layout.fillWidth: true
-                        onClicked: editor.close()
+                        spacing: 8
+                        TerminalField {
+                            id: passwordField
+                            Layout.fillWidth: true
+                            echoMode: showPassword.checked ? TextInput.Normal : TextInput.Password
+                        }
+                        TerminalButton {
+                            text: "GENERATE"
+                            fillColor: window.accentColor
+                            hoverFillColor: window.accentHoverColor
+                            labelColor: window.buttonTextColor
+                            outlineColor: window.accentColor
+                            onClicked: {
+                                var generated = backend.generatePassword(lengthBox.value, symbolBox.checked)
+                                if (generated)
+                                    passwordField.text = generated
+                            }
+                        }
                     }
-                    TerminalButton {
-                        text: "SAVE ENTRY"
+                    RowLayout {
                         Layout.fillWidth: true
-                        fillColor: window.accentColor
-                        hoverFillColor: window.accentHoverColor
-                        labelColor: window.buttonTextColor
-                        outlineColor: window.accentColor
-                        onClicked: {
-                            var saved = editor.editMode
-                                ? backend.editEntry(editor.originalName, nameField.text,
-                                                    usernameField.text, passwordField.text,
-                                                    notesField.text)
-                                : backend.addEntry(nameField.text, usernameField.text,
-                                                   passwordField.text, notesField.text)
-                            if (saved)
-                                editor.close()
+                        spacing: 13
+                        CheckBox { id: showPassword; text: "SHOW"; checked: false }
+                        TerminalText { text: "LENGTH"; color: window.mutedColor; font.pixelSize: 10 }
+                        SpinBox {
+                            id: lengthBox
+                            from: 12
+                            to: 256
+                            value: 24
+                            editable: true
+                            font.family: "Menlo"
+                        }
+                        CheckBox { id: symbolBox; text: "SYMBOLS"; checked: true }
+                        Item { Layout.fillWidth: true }
+                    }
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 46
+                        color: window.panelHighColor
+                        border.width: 1
+                        border.color: window.borderColor
+                        TerminalText {
+                            anchors.fill: parent
+                            anchors.margins: 9
+                            text: backend.passwordHealth(passwordField.text).text
+                            color: window.accentColor
+                            font.pixelSize: 9
+                            wrapMode: Text.Wrap
+                        }
+                    }
+                    TerminalText { text: "NOTES"; color: window.mutedColor; font.pixelSize: 9; font.bold: true }
+                    TerminalArea { id: notesField; Layout.fillWidth: true; Layout.fillHeight: true }
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Layout.topMargin: 8
+                        spacing: 8
+                        TerminalButton {
+                            text: "CANCEL"
+                            Layout.fillWidth: true
+                            onClicked: editor.close()
+                        }
+                        TerminalButton {
+                            text: "SAVE ENTRY"
+                            Layout.fillWidth: true
+                            fillColor: window.accentColor
+                            hoverFillColor: window.accentHoverColor
+                            labelColor: window.buttonTextColor
+                            outlineColor: window.accentColor
+                            onClicked: {
+                                var saved = editor.editMode
+                                    ? backend.editEntry(editor.originalName, nameField.text,
+                                                        usernameField.text, passwordField.text,
+                                                        notesField.text)
+                                    : backend.addEntry(nameField.text, usernameField.text,
+                                                       passwordField.text, notesField.text)
+                                if (saved)
+                                    editor.close()
+                            }
                         }
                     }
                 }
             }
         }
+    }
     }
 }

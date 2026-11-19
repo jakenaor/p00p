@@ -5,3 +5,10 @@ __pycache__/
 # A joke vault can still contain secrets. Never commit one.
 *.p00p
 *.poop
+
+.DS_Store
+build/
+dist/
+packaging/P00P-1024.png
+packaging/P00P.icns
+packaging/P00P.iconset/
