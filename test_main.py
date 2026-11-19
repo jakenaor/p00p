@@ -57,6 +57,24 @@ class FormatTests(Unittest.TestCase):
         with self.assertRaisesRegex(Main.P00PError, "invalid password"):
             Main.EncodeVault(Vault)
 
+    def testCompressedPayloadCannotExpandForever(self):
+        Vault = Main.NewVault()
+        Vault["entries"]["tiny zip bomb costume"] = {
+            "username": "fake",
+            "password": "also fake",
+            "notes": "A" * 20_000,
+        }
+        Encoded = Main.EncodeVault(Vault, Salt=b"z" * Main.SALT_SIZE)
+
+        with Mock.patch.object(Main, "MAX_VAULT_DECODED_SIZE", 512):
+            with self.assertRaisesRegex(Main.P00PError, "safety limit"):
+                Main.DecodeVault(Encoded)
+
+    def testAbsurdlyLargeEnvelopeIsRejectedBeforeParsing(self):
+        with Mock.patch.object(Main, "MAX_VAULT_FILE_SIZE", 32):
+            with self.assertRaisesRegex(Main.P00PError, "suspiciously huge"):
+                Main.DecodeVault(b"x" * 33)
+
 
 #MARK: password stuffs
 class PasswordTests(Unittest.TestCase):
@@ -122,6 +140,29 @@ class StorageTests(Unittest.TestCase):
 
             self.assertEqual(Main.LoadVault(FilePath)["entries"], {})
             self.assertEqual(FilePath.stat().st_mode & 0o777, 0o600)
+
+    def testReadRefusesAFileOverTheConfiguredLimit(self):
+        with Tempfile.TemporaryDirectory() as Directory:
+            FilePath = Path(Directory) / ".too-big.p00p"
+            FilePath.write_bytes(b"x" * 65)
+
+            with Mock.patch.object(Main, "MAX_VAULT_FILE_SIZE", 64):
+                with self.assertRaisesRegex(Main.P00PError, "suspiciously huge"):
+                    Main.ReadVaultBlob(FilePath)
+
+    def testFailedAtomicSwapDoesNotPretendTheVaultSaved(self):
+        with Tempfile.TemporaryDirectory() as Directory:
+            FilePath = Path(Directory) / ".failed-save.p00p"
+            Vault = Main.NewVault()
+            OriginalTimestamp = Vault["updated_at"]
+
+            with Mock.patch.object(Main, "CurrentTime", return_value="later"), \
+                 Mock.patch.object(Main.Os, "replace", side_effect=OSError("nope")):
+                with self.assertRaisesRegex(Main.P00PError, "could not save"):
+                    Main.SaveVault(FilePath, Vault)
+
+            self.assertEqual(Vault["updated_at"], OriginalTimestamp)
+            self.assertEqual(tuple(Path(Directory).iterdir()), ())
 
 
 #MARK: command stuffs

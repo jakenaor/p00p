@@ -20,6 +20,15 @@ class CueResult:
         Mark = "✓" if self.Passed else "✗"
         return f"{Mark} {self.Name}: {self.Points}/{self.Possible} — {self.Explanation}"
 
+    def AsDictionary(self):
+        return {
+            "name": self.Name,
+            "passed": self.Passed,
+            "points": self.Points,
+            "possible": self.Possible,
+            "explanation": self.Explanation,
+        }
+
 
 class TheaterContext:
     def __init__(self, Vault, FilePath, Blob, Header, RitualReceipts):
@@ -162,6 +171,15 @@ class ApplauseMeter:
             "camouflage still is not encryption. only use fake passwords.",
         ))
         return "\n".join(Lines)
+
+    def AsDictionary(self):
+        return {
+            "score": self.Score,
+            "possible": self.Possible,
+            "rating": self.Rating(),
+            "cues": [Result.AsDictionary() for Result in self.Results],
+            "security_notice": "this is a joke score, not a security score",
+        }
 
 
 class CueBook:

@@ -44,7 +44,7 @@ ApplicationWindow {
     }
 
     function playSound(cue) {
-        // everything lands on one python hook, then ur future audio goblin takes over.
+        // everything lands on one python hook, then the procedural audio goblin takes over.
         backend.requestSound(cue)
     }
 
@@ -165,6 +165,67 @@ ApplicationWindow {
         }
     }
 
+    component TerminalSpin: SpinBox {
+        id: spin
+        editable: true
+        implicitWidth: 132
+        implicitHeight: 38
+        leftPadding: 36
+        rightPadding: 36
+        font.family: "Menlo"
+        font.pixelSize: 11
+
+        // the native mac stepper eats half the number, so this one gets actual boxes.
+        contentItem: TextInput {
+            text: spin.textFromValue(spin.value, spin.locale)
+            color: window.textColor
+            selectionColor: window.accentColor
+            selectedTextColor: window.buttonTextColor
+            font: spin.font
+            horizontalAlignment: TextInput.AlignHCenter
+            verticalAlignment: TextInput.AlignVCenter
+            readOnly: !spin.editable
+            validator: spin.validator
+            inputMethodHints: spin.inputMethodHints
+            selectByMouse: true
+        }
+        down.indicator: Rectangle {
+            x: 0
+            y: 0
+            width: 34
+            height: spin.height
+            color: spin.down.pressed ? "#223425" : window.panelColor
+            border.width: 1
+            border.color: window.borderColor
+            TerminalText {
+                anchors.centerIn: parent
+                text: "−"
+                font.pixelSize: 17
+                color: spin.enabled ? window.textColor : window.mutedColor
+            }
+        }
+        up.indicator: Rectangle {
+            x: spin.width - width
+            y: 0
+            width: 34
+            height: spin.height
+            color: spin.up.pressed ? "#223425" : window.panelColor
+            border.width: 1
+            border.color: window.borderColor
+            TerminalText {
+                anchors.centerIn: parent
+                text: "+"
+                font.pixelSize: 17
+                color: spin.enabled ? window.textColor : window.mutedColor
+            }
+        }
+        background: Rectangle {
+            color: window.panelHighColor
+            border.width: spin.activeFocus ? 2 : 1
+            border.color: spin.activeFocus ? window.accentColor : window.borderColor
+        }
+    }
+
     component TerminalCombo: Control {
         id: combo
         property var model: []
@@ -177,13 +238,54 @@ ApplicationWindow {
         implicitHeight: 34
         z: expanded ? 8000 : 0
         focus: expanded
+        activeFocusOnTab: true
         font.family: "Menlo"
         font.pixelSize: 11
         Accessible.role: Accessible.ComboBox
         Accessible.name: currentText
-        Keys.onEscapePressed: function(event) {
-            expanded = false
-            event.accepted = true
+
+        function openMenu() {
+            optionList.currentIndex = combo.currentIndex
+            combo.expanded = true
+            combo.forceActiveFocus()
+        }
+        function choose(index) {
+            if (index < 0 || index >= combo.model.length)
+                return
+            combo.currentIndex = index
+            combo.activated(index)
+            combo.expanded = false
+        }
+        function moveHighlight(amount) {
+            var count = combo.model.length
+            if (count === 0)
+                return
+            optionList.currentIndex = (optionList.currentIndex + amount + count) % count
+            optionList.positionViewAtIndex(optionList.currentIndex, ListView.Contain)
+        }
+        Keys.onPressed: function(event) {
+            if (event.key === Qt.Key_Escape && combo.expanded) {
+                combo.expanded = false
+                event.accepted = true
+            } else if (event.key === Qt.Key_Down || event.key === Qt.Key_Up) {
+                if (!combo.expanded)
+                    combo.openMenu()
+                combo.moveHighlight(event.key === Qt.Key_Down ? 1 : -1)
+                event.accepted = true
+            } else if (event.key === Qt.Key_Home && combo.expanded) {
+                optionList.currentIndex = 0
+                event.accepted = true
+            } else if (event.key === Qt.Key_End && combo.expanded) {
+                optionList.currentIndex = combo.model.length - 1
+                event.accepted = true
+            } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter
+                       || event.key === Qt.Key_Space) {
+                if (combo.expanded)
+                    combo.choose(optionList.currentIndex)
+                else
+                    combo.openMenu()
+                event.accepted = true
+            }
         }
         onActiveFocusChanged: {
             if (!activeFocus)
@@ -219,9 +321,10 @@ ApplicationWindow {
             onEntered: window.setHoverCursor(1, true)
             onExited: window.setHoverCursor(1, false)
             onClicked: {
-                combo.expanded = !combo.expanded
                 if (combo.expanded)
-                    combo.forceActiveFocus()
+                    combo.expanded = false
+                else
+                    combo.openMenu()
             }
         }
         Rectangle {
@@ -251,13 +354,13 @@ ApplicationWindow {
                     required property string modelData
                     width: ListView.view.width
                     height: 32
-                    color: optionMouse.containsMouse || combo.currentIndex === index
+                    color: optionMouse.containsMouse || optionList.currentIndex === index
                            ? window.accentColor : window.panelHighColor
                     Text {
                         anchors.fill: parent
                         anchors.leftMargin: 10
                         text: option.modelData.toUpperCase()
-                        color: optionMouse.containsMouse || combo.currentIndex === option.index
+                        color: optionMouse.containsMouse || optionList.currentIndex === option.index
                                ? window.buttonTextColor : window.textColor
                         font.family: "Menlo"
                         font.pixelSize: 11
@@ -272,9 +375,7 @@ ApplicationWindow {
                         onEntered: window.setHoverCursor(1, true)
                         onExited: window.setHoverCursor(1, false)
                         onClicked: {
-                            combo.currentIndex = option.index
-                            combo.activated(option.index)
-                            combo.expanded = false
+                            combo.choose(option.index)
                         }
                     }
                 }
@@ -301,35 +402,50 @@ ApplicationWindow {
         }
     }
 
-    Shortcut { sequences: [StandardKey.New]; onActivated: backend.newVault() }
-    Shortcut { sequences: [StandardKey.Open]; onActivated: backend.openVault() }
-    Shortcut { sequence: "Ctrl+Shift+N"; onActivated: editor.openNew() }
-    Shortcut { sequence: "Meta+Shift+N"; onActivated: editor.openNew() }
+    Shortcut { sequences: [StandardKey.New]; enabled: !backend.privacyCurtain; onActivated: backend.newVault() }
+    Shortcut { sequences: [StandardKey.Open]; enabled: !backend.privacyCurtain; onActivated: backend.openVault() }
+    Shortcut { sequence: "Ctrl+Shift+N"; enabled: !backend.privacyCurtain; onActivated: editor.openNew() }
+    Shortcut { sequence: "Meta+Shift+N"; enabled: !backend.privacyCurtain; onActivated: editor.openNew() }
     Shortcut {
         sequences: [StandardKey.Find]
-        enabled: !editor.visible
+        enabled: !editor.visible && !backend.privacyCurtain
         onActivated: searchField.forceActiveFocus()
     }
     Shortcut {
         sequence: "Ctrl+E"
-        enabled: !editor.visible && backend.selectedName !== "—"
+        enabled: !editor.visible && !backend.privacyCurtain && backend.selectedName !== "—"
         onActivated: editor.openEdit()
     }
     Shortcut {
         sequence: "Meta+E"
-        enabled: !editor.visible && backend.selectedName !== "—"
+        enabled: !editor.visible && !backend.privacyCurtain && backend.selectedName !== "—"
         onActivated: editor.openEdit()
     }
     Shortcut {
         sequences: [StandardKey.Save]
-        enabled: editor.visible
+        enabled: editor.visible && !backend.privacyCurtain
         onActivated: editor.save()
     }
-    Shortcut { sequence: "Meta+,"; onActivated: window.currentPage = 1 }
-    Shortcut { sequence: "Ctrl+,"; onActivated: window.currentPage = 1 }
+    Shortcut {
+        sequences: [StandardKey.Undo]
+        enabled: !editor.visible && !backend.privacyCurtain && backend.canUndo
+        onActivated: backend.undo()
+    }
+    Shortcut {
+        sequences: [StandardKey.Redo]
+        enabled: !editor.visible && !backend.privacyCurtain && backend.canRedo
+        onActivated: backend.redo()
+    }
+    Shortcut { sequence: "Meta+,"; enabled: !backend.privacyCurtain; onActivated: window.currentPage = 1 }
+    Shortcut { sequence: "Ctrl+,"; enabled: !backend.privacyCurtain; onActivated: window.currentPage = 1 }
+    Shortcut {
+        sequences: ["Meta+L", "Ctrl+L"]
+        enabled: backend.hasVault && !backend.privacyCurtain
+        onActivated: backend.dropPrivacyCurtain("KEYBOARD")
+    }
     Shortcut {
         sequence: "Escape"
-        enabled: window.customCursorActive && !editor.visible
+        enabled: window.customCursorActive && !editor.visible && !backend.privacyCurtain
         onActivated: window.customCursorActive = false
     }
 
@@ -473,6 +589,20 @@ ApplicationWindow {
                             }
                         }
                         TerminalButton {
+                            text: "UNDO"
+                            enabled: backend.canUndo
+                            ToolTip.visible: hovered
+                            ToolTip.text: backend.undoText
+                            onClicked: backend.undo()
+                        }
+                        TerminalButton {
+                            text: "REDO"
+                            enabled: backend.canRedo
+                            ToolTip.visible: hovered
+                            ToolTip.text: backend.redoText
+                            onClicked: backend.redo()
+                        }
+                        TerminalButton {
                             text: "NEW VAULT"
                             onClicked: backend.newVault()
                         }
@@ -591,6 +721,29 @@ ApplicationWindow {
                                 clip: true
                                 spacing: 4
                                 model: backend.entries
+                                activeFocusOnTab: true
+                                Keys.onPressed: function(event) {
+                                    if (event.key === Qt.Key_Up || event.key === Qt.Key_Down) {
+                                        backend.selectRelative(event.key === Qt.Key_Down ? 1 : -1)
+                                        event.accepted = true
+                                    } else if (event.key === Qt.Key_Home) {
+                                        backend.selectRow(0)
+                                        event.accepted = true
+                                    } else if (event.key === Qt.Key_End) {
+                                        backend.selectRow(entryList.count - 1)
+                                        event.accepted = true
+                                    } else if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter)
+                                               && backend.selectedName !== "—") {
+                                        editor.openEdit()
+                                        event.accepted = true
+                                    }
+                                }
+                                Connections {
+                                    target: backend
+                                    function onSelectionMoved(index) {
+                                        entryList.positionViewAtIndex(index, ListView.Contain)
+                                    }
+                                }
                                 // the vault can get tall without making the whole window scroll.
                                 ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
                                 delegate: Rectangle {
@@ -602,6 +755,9 @@ ApplicationWindow {
                                     border.width: 1
                                     border.color: modelData.name === backend.selectedName
                                                   ? window.accentColor : window.borderColor
+                                    Accessible.role: Accessible.ListItem
+                                    Accessible.name: modelData.name + ", " + modelData.username
+                                    Accessible.selected: modelData.name === backend.selectedName
                                     RowLayout {
                                         anchors.fill: parent
                                         anchors.leftMargin: 11
@@ -638,7 +794,10 @@ ApplicationWindow {
                                                      ? Qt.BlankCursor : Qt.PointingHandCursor
                                         onEntered: window.setHoverCursor(1, true)
                                         onExited: window.setHoverCursor(1, false)
-                                        onClicked: backend.selectEntry(modelData.name)
+                                        onClicked: {
+                                            entryList.forceActiveFocus()
+                                            backend.selectEntry(modelData.name)
+                                        }
                                         onDoubleClicked: {
                                             // select first so editEntry reads the row that was actually clicked.
                                             backend.selectEntry(modelData.name)
@@ -801,7 +960,7 @@ ApplicationWindow {
                                 Layout.leftMargin: 18
                                 Layout.rightMargin: 18
                                 Layout.topMargin: 18
-                                Layout.preferredHeight: 275
+                                Layout.preferredHeight: 345
                                 color: window.panelHighColor
                                 border.width: 1
                                 border.color: window.borderColor
@@ -811,7 +970,7 @@ ApplicationWindow {
                                     anchors.margins: 16
                                     spacing: 12
                                     TerminalText {
-                                        text: "AUDIO // FUTURE BEEP BOOPS"
+                                        text: "AUDIO + PRIVACY TIMERS // BEEP BOOPS"
                                         color: window.accentColor
                                         font.pixelSize: 12
                                         font.bold: true
@@ -896,13 +1055,11 @@ ApplicationWindow {
                                             color: window.mutedColor
                                             font.pixelSize: 9
                                         }
-                                        SpinBox {
+                                        TerminalSpin {
                                             from: 5
                                             to: 120
                                             value: backend.clipboardSeconds
-                                            editable: true
-                                            font.family: "Menlo"
-                                            Layout.preferredWidth: 105
+                                            Layout.preferredWidth: 132
                                             textFromValue: function(value, locale) {
                                                 return value + " SEC"
                                             }
@@ -917,13 +1074,11 @@ ApplicationWindow {
                                             font.pixelSize: 9
                                             Layout.leftMargin: 10
                                         }
-                                        SpinBox {
+                                        TerminalSpin {
                                             from: 5
                                             to: 120
                                             value: backend.revealSeconds
-                                            editable: true
-                                            font.family: "Menlo"
-                                            Layout.preferredWidth: 105
+                                            Layout.preferredWidth: 132
                                             textFromValue: function(value, locale) {
                                                 return value + " SEC"
                                             }
@@ -939,8 +1094,40 @@ ApplicationWindow {
                                             onClicked: backend.requestSound("ui_click")
                                         }
                                     }
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 8
+                                        TerminalText {
+                                            text: "IDLE CURTAIN"
+                                            color: window.mutedColor
+                                            font.pixelSize: 9
+                                        }
+                                        TerminalSpin {
+                                            from: 30
+                                            to: 3600
+                                            stepSize: 30
+                                            value: backend.idleSeconds
+                                            Layout.preferredWidth: 150
+                                            textFromValue: function(value, locale) {
+                                                return value < 60 ? value + " SEC"
+                                                     : Math.floor(value / 60) + " MIN"
+                                            }
+                                            valueFromText: function(text, locale) {
+                                                var number = parseInt(text)
+                                                return text.toUpperCase().includes("MIN")
+                                                       ? number * 60 : number
+                                            }
+                                            onValueModified: backend.setIdleSeconds(value)
+                                        }
+                                        Item { Layout.fillWidth: true }
+                                        TerminalButton {
+                                            text: "DROP CURTAIN NOW"
+                                            enabled: backend.hasVault
+                                            onClicked: backend.dropPrivacyCurtain("MANUAL BUTTON")
+                                        }
+                                    }
                                     TerminalText {
-                                        text: "ONE MASTER VOLUME CONTROLS EVERY CUE. PLAYBACK IS STILL YOUR TODO."
+                                        text: "THE CURTAIN HIDES THE UI + CLEARS P00P'S OWN CLIPBOARD TEXT. IT IS NOT A LOGIN SCREEN."
                                         color: window.mutedColor
                                         font.pixelSize: 9
                                         wrapMode: Text.Wrap
@@ -1025,6 +1212,156 @@ ApplicationWindow {
                                 Layout.fillWidth: true
                                 Layout.leftMargin: 18
                                 Layout.rightMargin: 18
+                                Layout.preferredHeight: 505
+                                color: window.panelHighColor
+                                border.width: 1
+                                border.color: window.borderColor
+
+                                ColumnLayout {
+                                    anchors.fill: parent
+                                    anchors.margins: 16
+                                    spacing: 9
+                                    TerminalText {
+                                        text: "VAULT UTILITIES // TINY HOSPITAL + LIFEBOAT DOCK"
+                                        color: window.accentColor
+                                        font.pixelSize: 12
+                                        font.bold: true
+                                    }
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 8
+                                        TerminalButton {
+                                            text: "RUN 12-CHECK DOCTOR"
+                                            Layout.fillWidth: true
+                                            enabled: backend.hasVault
+                                            onClicked: backend.runDoctor()
+                                        }
+                                        TerminalButton {
+                                            text: "LAUNCH LIFEBOAT SNAPSHOT"
+                                            Layout.fillWidth: true
+                                            enabled: backend.hasVault
+                                            fillColor: window.accentColor
+                                            hoverFillColor: window.accentHoverColor
+                                            labelColor: window.buttonTextColor
+                                            outlineColor: window.accentColor
+                                            onClicked: backend.backupVault()
+                                        }
+                                    }
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 8
+                                        TerminalButton {
+                                            text: "NEW 24-ENTRY DECOY BOWL"
+                                            Layout.fillWidth: true
+                                            onClicked: backend.newDecoyVault()
+                                        }
+                                        TerminalButton {
+                                            text: "REROLL CAMOUFLAGE"
+                                            Layout.fillWidth: true
+                                            enabled: backend.hasVault
+                                            onClicked: backend.rerollCamouflage()
+                                        }
+                                    }
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 8
+                                        TerminalButton {
+                                            text: "EXPORT SAFE REPORT"
+                                            Layout.fillWidth: true
+                                            enabled: backend.hasVault
+                                            onClicked: backend.exportSafeReport()
+                                        }
+                                        TerminalButton {
+                                            text: "RUN 10-ROUND STORAGE LAB"
+                                            Layout.fillWidth: true
+                                            enabled: backend.hasVault
+                                            onClicked: backend.runStorageLab()
+                                        }
+                                    }
+                                    TerminalButton {
+                                        text: "MERGE ANOTHER BOWL INTO A THIRD BOWL"
+                                        Layout.fillWidth: true
+                                        enabled: backend.hasVault
+                                        onClicked: backend.mergeAnotherVault()
+                                    }
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 8
+                                        TerminalButton {
+                                            text: "STAMP BYTE SEAL"
+                                            Layout.fillWidth: true
+                                            enabled: backend.hasVault
+                                            onClicked: backend.stampVaultSeal()
+                                        }
+                                        TerminalButton {
+                                            text: "VERIFY BYTE SEAL"
+                                            Layout.fillWidth: true
+                                            enabled: backend.hasVault
+                                            onClicked: backend.verifyVaultSeal()
+                                        }
+                                    }
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 8
+                                        TerminalButton {
+                                            objectName: "ledgerStampButton"
+                                            text: "STAMP LEDGER CHECKPOINT"
+                                            Layout.fillWidth: true
+                                            enabled: backend.hasVault
+                                            onClicked: backend.stampLedgerCheckpoint()
+                                        }
+                                        TerminalButton {
+                                            objectName: "ledgerVerifyButton"
+                                            text: "VERIFY BOWL LEDGER"
+                                            Layout.fillWidth: true
+                                            enabled: backend.hasVault
+                                            onClicked: backend.verifyVaultLedger()
+                                        }
+                                    }
+                                    DetailLine {
+                                        fieldName: "DOCTOR"
+                                        fieldValue: backend.doctorSummary
+                                    }
+                                    DetailLine {
+                                        fieldName: "BOWL STATS"
+                                        fieldValue: backend.statsSummary
+                                    }
+                                    DetailLine {
+                                        fieldName: "BYTE SEAL"
+                                        fieldValue: backend.sealSummary
+                                    }
+                                    DetailLine {
+                                        fieldName: "FORMAT LAB"
+                                        fieldValue: backend.labSummary
+                                    }
+                                    DetailLine {
+                                        fieldName: "BOWL LEDGER"
+                                        fieldValue: backend.ledgerSummary
+                                    }
+                                    ColumnLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 3
+                                        TerminalText {
+                                            text: "LAST LIFEBOAT"
+                                            color: window.mutedColor
+                                            font.pixelSize: 9
+                                            font.bold: true
+                                        }
+                                        TerminalText {
+                                            text: backend.lastLifeboat
+                                            color: window.textColor
+                                            font.pixelSize: 9
+                                            elide: Text.ElideMiddle
+                                            Layout.fillWidth: true
+                                        }
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                Layout.fillWidth: true
+                                Layout.leftMargin: 18
+                                Layout.rightMargin: 18
                                 Layout.bottomMargin: 18
                                 Layout.preferredHeight: 175
                                 color: "#180909"
@@ -1067,7 +1404,7 @@ ApplicationWindow {
                                     }
                                     TerminalText {
                                         visible: backend.hasEntries
-                                        text: "THIS ASKS ONCE, THEN EMPTIES THE OPEN VAULT FOR REAL."
+                                        text: "THIS ASKS ONCE. SESSION UNDO CAN BRING IT BACK UNTIL U OPEN ANOTHER VAULT."
                                         color: window.mutedColor
                                         font.pixelSize: 9
                                         wrapMode: Text.Wrap
@@ -1303,13 +1640,12 @@ ApplicationWindow {
                         spacing: 13
                         CheckBox { id: showPassword; text: "SHOW"; checked: false }
                         TerminalText { text: "LENGTH"; color: window.mutedColor; font.pixelSize: 10 }
-                        SpinBox {
+                        TerminalSpin {
                             id: lengthBox
                             from: 12
                             to: 256
                             value: 24
-                            editable: true
-                            font.family: "Menlo"
+                            Layout.preferredWidth: 132
                         }
                         CheckBox { id: symbolBox; text: "SYMBOLS"; checked: true }
                         Item { Layout.fillWidth: true }
@@ -1350,6 +1686,102 @@ ApplicationWindow {
                             onClicked: editor.save()
                         }
                     }
+                }
+            }
+        }
+    }
+
+    //MARK: deliberately fake lock screen thingy
+    Item {
+        id: privacyCurtain
+        objectName: "privacyCurtain"
+        anchors.fill: parent
+        z: 20000
+        visible: backend.privacyCurtain
+        enabled: visible
+        focus: visible
+
+        onVisibleChanged: {
+            if (visible)
+                Qt.callLater(function() { liftCurtainButton.forceActiveFocus() })
+        }
+
+        Rectangle {
+            anchors.fill: parent
+            color: "#f5030604"
+        }
+
+        MouseArea {
+            // eat clicks so nothing under the curtain edits itself in the dark.
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: window.customCursorActive ? Qt.BlankCursor : Qt.ArrowCursor
+        }
+
+        Rectangle {
+            width: Math.min(610, privacyCurtain.width - 56)
+            height: 350
+            anchors.centerIn: parent
+            color: window.panelColor
+            border.width: 3
+            border.color: window.accentColor
+
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: 28
+                spacing: 14
+
+                TerminalText {
+                    text: "//// PRIVACY CURTAIN DROPPED ////"
+                    color: window.accentColor
+                    font.pixelSize: 23
+                    font.bold: true
+                    Layout.alignment: Qt.AlignHCenter
+                }
+                TerminalText {
+                    text: "THE BOWL IS STILL OPEN UNDER HERE"
+                    color: window.textColor
+                    font.pixelSize: 13
+                    font.bold: true
+                    Layout.alignment: Qt.AlignHCenter
+                }
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 82
+                    color: "#120d08"
+                    border.width: 1
+                    border.color: window.dangerColor
+                    TerminalText {
+                        anchors.fill: parent
+                        anchors.margins: 13
+                        text: "THIS IS A COSMETIC SCREEN COVER, NOT AUTHENTICATION, ENCRYPTION, OR A MASTER PASSWORD. ANYONE CAN PRESS THE BUTTON."
+                        color: window.dangerColor
+                        font.pixelSize: 11
+                        font.bold: true
+                        wrapMode: Text.Wrap
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                }
+                TerminalText {
+                    text: "P00P-OWNED CLIPBOARD TEXT WAS CLEARED. THE IDLE CLOCK RESTARTS AFTER U LIFT THIS."
+                    color: window.mutedColor
+                    font.pixelSize: 10
+                    wrapMode: Text.Wrap
+                    horizontalAlignment: Text.AlignHCenter
+                    Layout.fillWidth: true
+                }
+                Item { Layout.fillHeight: true }
+                TerminalButton {
+                    id: liftCurtainButton
+                    objectName: "liftCurtainButton"
+                    text: "LIFT CURTAIN // NO PASSWORD REQUIRED"
+                    Layout.fillWidth: true
+                    fillColor: window.accentColor
+                    hoverFillColor: window.accentHoverColor
+                    labelColor: window.buttonTextColor
+                    outlineColor: window.accentColor
+                    onClicked: backend.liftPrivacyCurtain()
                 }
             }
         }

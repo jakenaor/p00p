@@ -11,47 +11,50 @@ import subprocess as Subprocess
 import sys as Sys
 from pathlib import Path
 
-from PySide6.QtCore import Property, QEvent, QObject, QSettings, Qt, QTimer, QUrl, Signal, Slot
+from PySide6.QtCore import (
+    Property, QAbstractEventDispatcher, QEvent, QObject, QSettings, Qt, QTimer,
+    QUrl, Signal, Slot,
+)
 from PySide6.QtGui import QCursor, QGuiApplication
 from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtQuickControls2 import QQuickStyle
-from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
+from PySide6.QtWidgets import QApplication, QFileDialog, QInputDialog, QMessageBox
 
 import main as Main
+import lifeboat as Lifeboat
+import soundboard as Soundboard
+import decoy as Decoy
+import history as History
+import merge as Merge
+import reroll as Reroll
+import report as Report
+import seal as Seal
+import lab as Lab
+import ledger as Ledger
 
 
 ROOT = Path(__file__).resolve().parent
 QML_FILE = ROOT / "qml" / "Main.qml"
 SHADER_SOURCE = ROOT / "qml" / "shaders" / "crt.frag"
 SHADER_PACK = ROOT / "qml" / "shaders" / "crt.frag.qsb"
-SOUND_CUES = frozenset({
-    "ui_click",
-    "dialog_open",
-    "dialog_close",
-    "vault_open",
-    "vault_new",
-    "entry_save",
-    "entry_remove",
-    "delete_all",
-    "generate",
-    "copy",
-    "reveal",
-    "hide",
-    "error",
-    "easter_egg",
-})
+SOUND_CUES = Soundboard.CUE_NAMES
 DEFAULT_VOLUME = 70
 DEFAULT_SFX_ENABLED = True
 DEFAULT_SHADER_ENABLED = True
 DEFAULT_CLIPBOARD_SECONDS = 20
 DEFAULT_REVEAL_SECONDS = 20
+DEFAULT_IDLE_SECONDS = 300
 MIN_TIMER_SECONDS = 5
 MAX_TIMER_SECONDS = 120
+MIN_IDLE_SECONDS = 30
+MAX_IDLE_SECONDS = 3600
+GUI_LAB_ROUNDS = 10
 
 
 def HandleSoundCue(Cue, Volume):
-    # YOUR SOUND STUFF GOES HERE!! map Cue to a wav and play it without blocking qt.
-    # Volume is 0-100. all the ui actions already land here so u only wire it once.
+    # the beep goblin makes a tiny wav on first use and QSoundEffect plays it async.
+    # audio trouble is deliberately nonfatal; this function remains a signal sink.
+    Soundboard.PlayCue(Cue, Volume)
     return None
 
 
@@ -69,12 +72,25 @@ def ClampTimer(Value, Default):
         return Default
 
 
+def ClampIdleTimer(Value):
+    try:
+        return max(MIN_IDLE_SECONDS, min(MAX_IDLE_SECONDS, int(Value)))
+    except (TypeError, ValueError):
+        return DEFAULT_IDLE_SECONDS
+
+
 def SettingBool(Value, Default=True):
     if isinstance(Value, bool):
         return Value
     if Value is None:
         return bool(Default)
     return str(Value).strip().casefold() in {"1", "true", "yes", "on"}
+
+
+def QtTimersAvailable():
+    # unit tests often have no running event dispatcher. starting a real QTimer there
+    # only prints spooky warnings and never creates a useful deadline anyway.
+    return QAbstractEventDispatcher.instance() is not None
 
 
 #MARK: shader stuffs
@@ -140,8 +156,12 @@ class VaultBackend(QObject):
     vaultPathChanged = Signal()
     entriesChanged = Signal()
     selectionChanged = Signal()
+    selectionMoved = Signal(int)
     statusChanged = Signal()
     settingsChanged = Signal()
+    utilityChanged = Signal()
+    historyChanged = Signal()
+    privacyChanged = Signal()
     soundRequested = Signal(str, int)
 
     def __init__(self, StartPath=None, Settings=None):
@@ -154,7 +174,15 @@ class VaultBackend(QObject):
         self.SortColumn = "name"
         self.SortDescending = False
         self.PasswordVisible = False
+        self.PrivacyCurtain = False
         self.Status = "SYS // READY"
+        self.DoctorSummary = "NO VAULT OPEN"
+        self.StatsSummary = "NO VAULT OPEN"
+        self.LastLifeboat = "NO LIFEBOAT LAUNCHED THIS SESSION"
+        self.SealSummary = "NO SEAL CHECKED THIS SESSION"
+        self.LabSummary = "NO STORAGE LAB RUN THIS SESSION"
+        self.LedgerSummary = "NO BOWL LEDGER CHECKED THIS SESSION"
+        self.History = History.HistoryBook()
         self.Volume = ClampVolume(self.Settings.value("audio/volume", DEFAULT_VOLUME))
         self.SfxEnabled = SettingBool(
             self.Settings.value("audio/enabled", DEFAULT_SFX_ENABLED),
@@ -172,6 +200,22 @@ class VaultBackend(QObject):
             self.Settings.value("privacy/reveal_seconds", DEFAULT_REVEAL_SECONDS),
             DEFAULT_REVEAL_SECONDS,
         )
+        self.IdleSeconds = ClampIdleTimer(
+            self.Settings.value("privacy/idle_seconds", DEFAULT_IDLE_SECONDS)
+        )
+
+        # owned timers can be restarted. random old callbacks should not win fights
+        # against a newer copy or a newly revealed row.
+        self.ClipboardText = ""
+        self.ClipboardTimer = QTimer(self)
+        self.ClipboardTimer.setSingleShot(True)
+        self.ClipboardTimer.timeout.connect(self._clear_clipboard_if_unchanged)
+        self.RevealTimer = QTimer(self)
+        self.RevealTimer.setSingleShot(True)
+        self.RevealTimer.timeout.connect(self._hide_password)
+        self.IdleTimer = QTimer(self)
+        self.IdleTimer.setSingleShot(True)
+        self.IdleTimer.timeout.connect(self._idle_curtain_timeout)
 
         Candidate = Path(StartPath or Os.environ.get("P00P_FILE", Main.DEFAULT_VAULT))
         if Candidate.is_file():
@@ -216,10 +260,43 @@ class VaultBackend(QObject):
         self.entriesChanged.emit()
         self.selectionChanged.emit()
         self.statusChanged.emit()
+        self.utilityChanged.emit()
+        self.historyChanged.emit()
+        self.privacyChanged.emit()
 
     def _set_status(self, Text):
         self.Status = f"SYS // {Text.upper()}"
         self.statusChanged.emit()
+
+    def _refresh_doctor_summary(self):
+        if self.FilePath is None:
+            self.DoctorSummary = "NO VAULT OPEN"
+            self.utilityChanged.emit()
+            return False
+        try:
+            Report = Main.VaultDoctorReport(self.FilePath)
+        except (Main.P00PError, OSError) as Exc:
+            self.DoctorSummary = f"DOCTOR FAILED // {type(Exc).__name__.upper()}"
+            self.utilityChanged.emit()
+            return False
+        self.DoctorSummary = Report.Summary().upper()
+        self.utilityChanged.emit()
+        return True
+
+    def _refresh_stats_summary(self):
+        if self.FilePath is None:
+            self.StatsSummary = "NO VAULT OPEN"
+            self.utilityChanged.emit()
+            return False
+        try:
+            Report = Main.BowlStatisticsReport(self.FilePath)
+        except (Main.P00PError, OSError) as Exc:
+            self.StatsSummary = f"STATS FAILED // {type(Exc).__name__.upper()}"
+            self.utilityChanged.emit()
+            return False
+        self.StatsSummary = Report.Summary()
+        self.utilityChanged.emit()
+        return True
 
     @Slot(str)
     def requestSound(self, Cue):
@@ -239,11 +316,19 @@ class VaultBackend(QObject):
         # only replace the live ui state after the whole file survived decoding.
         self.Vault = Vault
         self.FilePath = Path(FilePath)
+        self.PrivacyCurtain = False
         Names = sorted(Vault.get("entries", {}), key=str.casefold)
         self.SelectedName = Names[0] if Names else ""
-        self.PasswordVisible = False
+        self._cover_password()
+        self.History.Clear()
+        self.SealSummary = "NOT CHECKED FOR THIS OPEN BOWL"
+        self.LabSummary = "NOT RUN FOR THIS OPEN BOWL"
+        self.LedgerSummary = "NOT CHECKED FOR THIS OPEN BOWL"
+        self._refresh_doctor_summary()
+        self._refresh_stats_summary()
         self.Status = f"SYS // OPENED {len(Names)} VAULT ENTR{'Y' if len(Names) == 1 else 'IES'}"
         self._emit_everything()
+        self._restart_idle_timer()
         self.requestSound(SoundCue)
         return True
 
@@ -256,6 +341,12 @@ class VaultBackend(QObject):
             self.requestSound("error")
             QMessageBox.critical(None, "SAVE ERROR", str(Exc))
             return False
+        self._refresh_doctor_summary()
+        self._refresh_stats_summary()
+        self.SealSummary = "VAULT CHANGED // EXISTING SEAL MAY BE STALE"
+        self.LabSummary = "VAULT CHANGED // RUN LAB AGAIN"
+        self.LedgerSummary = "VAULT CHANGED // LEDGER CHECKPOINT IS STALE"
+        self.utilityChanged.emit()
         return True
 
     @Property(str, notify=vaultPathChanged)
@@ -312,6 +403,50 @@ class VaultBackend(QObject):
     def statusText(self):
         return self.Status
 
+    @Property(str, notify=utilityChanged)
+    def doctorSummary(self):
+        return self.DoctorSummary
+
+    @Property(str, notify=utilityChanged)
+    def statsSummary(self):
+        return self.StatsSummary
+
+    @Property(str, notify=utilityChanged)
+    def lastLifeboat(self):
+        return self.LastLifeboat
+
+    @Property(str, notify=utilityChanged)
+    def sealSummary(self):
+        return self.SealSummary
+
+    @Property(str, notify=utilityChanged)
+    def labSummary(self):
+        return self.LabSummary
+
+    @Property(str, notify=utilityChanged)
+    def ledgerSummary(self):
+        return self.LedgerSummary
+
+    @Property(bool, notify=vaultPathChanged)
+    def hasVault(self):
+        return self.Vault is not None and self.FilePath is not None
+
+    @Property(bool, notify=historyChanged)
+    def canUndo(self):
+        return self.History.CanUndo
+
+    @Property(bool, notify=historyChanged)
+    def canRedo(self):
+        return self.History.CanRedo
+
+    @Property(str, notify=historyChanged)
+    def undoText(self):
+        return self.History.UndoLabel
+
+    @Property(str, notify=historyChanged)
+    def redoText(self):
+        return self.History.RedoLabel
+
     #MARK: settings stuffs
     @Property(int, notify=settingsChanged)
     def volume(self):
@@ -332,6 +467,14 @@ class VaultBackend(QObject):
     @Property(int, notify=settingsChanged)
     def revealSeconds(self):
         return self.RevealSeconds
+
+    @Property(int, notify=settingsChanged)
+    def idleSeconds(self):
+        return self.IdleSeconds
+
+    @Property(bool, notify=privacyChanged)
+    def privacyCurtain(self):
+        return self.PrivacyCurtain
 
     @Property(bool, notify=entriesChanged)
     def hasEntries(self):
@@ -386,6 +529,8 @@ class VaultBackend(QObject):
         self.ClipboardSeconds = Seconds
         self.Settings.setValue("privacy/clipboard_seconds", Seconds)
         self.Settings.sync()
+        if self.ClipboardTimer.isActive():
+            self.ClipboardTimer.start(Seconds * 1000)
         self.settingsChanged.emit()
 
     @Slot(int)
@@ -396,6 +541,19 @@ class VaultBackend(QObject):
         self.RevealSeconds = Seconds
         self.Settings.setValue("privacy/reveal_seconds", Seconds)
         self.Settings.sync()
+        if self.RevealTimer.isActive():
+            self.RevealTimer.start(Seconds * 1000)
+        self.settingsChanged.emit()
+
+    @Slot(int)
+    def setIdleSeconds(self, Seconds):
+        Seconds = ClampIdleTimer(Seconds)
+        if Seconds == self.IdleSeconds:
+            return
+        self.IdleSeconds = Seconds
+        self.Settings.setValue("privacy/idle_seconds", Seconds)
+        self.Settings.sync()
+        self._restart_idle_timer()
         self.settingsChanged.emit()
 
     @Slot()
@@ -406,14 +564,399 @@ class VaultBackend(QObject):
         self.ShaderEnabled = DEFAULT_SHADER_ENABLED
         self.ClipboardSeconds = DEFAULT_CLIPBOARD_SECONDS
         self.RevealSeconds = DEFAULT_REVEAL_SECONDS
+        self.IdleSeconds = DEFAULT_IDLE_SECONDS
         self.Settings.setValue("audio/volume", self.Volume)
         self.Settings.setValue("audio/enabled", self.SfxEnabled)
         self.Settings.setValue("display/shader", self.ShaderEnabled)
         self.Settings.setValue("privacy/clipboard_seconds", self.ClipboardSeconds)
         self.Settings.setValue("privacy/reveal_seconds", self.RevealSeconds)
+        self.Settings.setValue("privacy/idle_seconds", self.IdleSeconds)
         self.Settings.sync()
+        self._restart_idle_timer()
         self.settingsChanged.emit()
         self.requestSound("ui_click")
+
+    #MARK: diagnostic and lifeboat stuffs
+    @Slot(result=bool)
+    def runDoctor(self):
+        if not self.hasVault:
+            self._set_status("NO VAULT OPEN FOR DOCTOR")
+            self.requestSound("error")
+            return False
+        Healthy = self._refresh_doctor_summary()
+        if Healthy:
+            self._set_status(f"DOCTOR // {self.DoctorSummary}")
+            self.requestSound("doctor")
+        else:
+            self._set_status("VAULT DOCTOR COULD NOT FINISH")
+            self.requestSound("error")
+        return Healthy
+
+    @Slot(result=bool)
+    def runStorageLab(self):
+        if not self.hasVault:
+            self._set_status("NO VAULT OPEN FOR STORAGE LAB")
+            self.requestSound("error")
+            return False
+        try:
+            Result = Main.StorageLabForVault(self.FilePath, GUI_LAB_ROUNDS)
+        except (Main.P00PError, Lab.LabError, OSError) as Exc:
+            self.LabSummary = f"LAB FAILED // {type(Exc).__name__.upper()}"
+            self.utilityChanged.emit()
+            self.requestSound("error")
+            QMessageBox.critical(None, "STORAGE LAB ERROR", str(Exc))
+            return False
+        self.LabSummary = Result.Summary()
+        self.utilityChanged.emit()
+        if Result.Passed:
+            self._set_status("STORAGE LAB // ALL FORMAT BEHAVIOR CHECKS PASSED")
+            self.requestSound("doctor")
+        else:
+            self._set_status("STORAGE LAB // SOMETHING NEEDS ATTENTION")
+            self.requestSound("error")
+        QMessageBox.information(None, "P00P WEIRD STORAGE LAB", Result.AsText())
+        return Result.Passed
+
+    @Slot(result=bool)
+    def backupVault(self):
+        if not self.hasVault:
+            self._set_status("NO VAULT OPEN FOR LIFEBOAT")
+            self.requestSound("error")
+            return False
+        try:
+            Blob = Main.ReadVaultBlob(self.FilePath)
+            Vault = Main.DecodeVault(Blob)
+            Destination = Lifeboat.SuggestedSnapshotPath(self.FilePath)
+            Receipt = Lifeboat.Launch(
+                Source=self.FilePath,
+                Destination=Destination,
+                Blob=Blob,
+                EntryCount=len(Vault["entries"]),
+                Action="backup",
+            )
+        except (
+            Main.P00PError,
+            Lifeboat.LifeboatError,
+            OSError,
+        ) as Exc:
+            self.requestSound("error")
+            QMessageBox.critical(None, "LIFEBOAT ERROR", str(Exc))
+            return False
+        self.LastLifeboat = str(Receipt.Destination)
+        self.utilityChanged.emit()
+        self._set_status(f"LIFEBOAT LAUNCHED // {Receipt.Destination.name}")
+        self.requestSound("backup")
+        return True
+
+    @Slot(result=bool)
+    def newDecoyVault(self):
+        Filename, _ = QFileDialog.getSaveFileName(
+            None,
+            "NEW FAKE DEMO BOWL",
+            str(ROOT / ".p00p-demo.p00p"),
+            "p00p vaults (*.p00p *.poop);;All files (*)",
+        )
+        if not Filename:
+            return False
+        FilePath = Path(Filename)
+        if not FilePath.suffix:
+            FilePath = FilePath.with_suffix(".p00p")
+        if FilePath.exists():
+            Answer = QMessageBox.warning(
+                None,
+                "REPLACE EXISTING BOWL?",
+                f"{FilePath.name} already exists. replace it with 24 fake demo entries?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if Answer != QMessageBox.StandardButton.Yes:
+                return False
+        Vault = Main.NewVault()
+        try:
+            Decoy.PopulateVault(Vault, 24, Main.CurrentTime)
+            Main.SaveVault(FilePath, Vault)
+        except (Main.P00PError, Decoy.DecoyError, OSError) as Exc:
+            self.requestSound("error")
+            QMessageBox.critical(None, "DECOY FOUNDRY ERROR", str(Exc))
+            return False
+        Loaded = self._load(FilePath, SoundCue="vault_new")
+        if Loaded:
+            self._set_status("NEW 24-ENTRY DECOY BOWL READY")
+        return Loaded
+
+    @Slot(result=bool)
+    def rerollCamouflage(self):
+        if not self.hasVault:
+            self._set_status("NO VAULT OPEN TO REROLL")
+            self.requestSound("error")
+            return False
+        try:
+            Receipt = Main.RerollVault(self.FilePath)
+        except (
+            Main.P00PError,
+            Lifeboat.LifeboatError,
+            Reroll.RerollError,
+            OSError,
+        ) as Exc:
+            self.requestSound("error")
+            QMessageBox.critical(None, "CAMOUFLAGE REROLL ERROR", str(Exc))
+            return False
+        self._refresh_doctor_summary()
+        self._refresh_stats_summary()
+        self.SealSummary = "CAMOUFLAGE REROLLED // EXISTING SEAL IS STALE"
+        self.LabSummary = "CAMOUFLAGE CHANGED // RUN LAB AGAIN"
+        self.LedgerSummary = "CAMOUFLAGE CHANGED // LEDGER CHECKPOINT IS STALE"
+        self.utilityChanged.emit()
+        self._set_status(f"CAMOUFLAGE REROLLED // {Receipt.AfterHash[:12]}")
+        self.requestSound("generate")
+        return True
+
+    @Slot(result=bool)
+    def stampLedgerCheckpoint(self):
+        if not self.hasVault:
+            self._set_status("NO VAULT OPEN FOR BOWL LEDGER")
+            self.requestSound("error")
+            return False
+        try:
+            Result = Main.RecordVaultLedger(self.FilePath, Action="checkpoint")
+        except (
+            Main.P00PError,
+            Ledger.LedgerError,
+            Lifeboat.LifeboatError,
+            OSError,
+        ) as Exc:
+            self.LedgerSummary = f"LEDGER FAILED // {type(Exc).__name__.upper()}"
+            self.utilityChanged.emit()
+            self.requestSound("error")
+            QMessageBox.critical(None, "BOWL LEDGER ERROR", str(Exc))
+            return False
+        self.LedgerSummary = Result.Summary()
+        self.utilityChanged.emit()
+        self._set_status(f"BOWL LEDGER CHECKPOINT #{len(Result.Records)} STAMPED")
+        self.requestSound("backup")
+        return True
+
+    @Slot(result=bool)
+    def verifyVaultLedger(self):
+        if not self.hasVault:
+            self._set_status("NO VAULT OPEN TO CHECK AGAINST LEDGER")
+            self.requestSound("error")
+            return False
+        try:
+            Result = Main.VerifyVaultLedger(self.FilePath)
+        except (Main.P00PError, Ledger.LedgerError, OSError) as Exc:
+            self.LedgerSummary = "LEDGER CHECK COULD NOT RUN"
+            self.utilityChanged.emit()
+            self.requestSound("error")
+            QMessageBox.critical(None, "BOWL LEDGER VERIFY ERROR", str(Exc))
+            return False
+        self.LedgerSummary = Result.Summary()
+        self.utilityChanged.emit()
+        if Result.Passed:
+            self._set_status("BOWL LEDGER // CURRENT BYTES MATCH LAST CHECKPOINT")
+            self.requestSound("doctor")
+        else:
+            self._set_status("BOWL LEDGER // VAULT CHANGED SINCE LAST CHECKPOINT")
+            self.requestSound("error")
+            QMessageBox.warning(
+                None,
+                "BOWL LEDGER IS STALE",
+                Result.AsText(),
+                QMessageBox.StandardButton.Ok,
+                QMessageBox.StandardButton.Ok,
+            )
+        return Result.Passed
+
+    @Slot(result=bool)
+    def exportSafeReport(self):
+        if not self.hasVault:
+            self._set_status("NO VAULT OPEN TO REPORT ON")
+            self.requestSound("error")
+            return False
+        DefaultName = self.FilePath.with_name(f"{self.FilePath.stem}-report.md")
+        Filename, _ = QFileDialog.getSaveFileName(
+            None,
+            "EXPORT SECRET-SAFE REPORT",
+            str(DefaultName),
+            "Markdown (*.md);;JSON (*.json);;Plain text (*.txt)",
+        )
+        if not Filename:
+            return False
+        FilePath = Path(Filename)
+        Suffix = FilePath.suffix.casefold()
+        Format = "json" if Suffix == ".json" else "text" if Suffix == ".txt" else "markdown"
+        if not Suffix:
+            FilePath = FilePath.with_suffix(".md")
+        Force = False
+        if FilePath.exists():
+            Answer = QMessageBox.warning(
+                None,
+                "REPLACE EXISTING REPORT?",
+                f"{FilePath.name} already exists. replace it with a fresh safe report?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if Answer != QMessageBox.StandardButton.Yes:
+                return False
+            Force = True
+        try:
+            Submission = Main.SubmissionReportForVault(self.FilePath)
+            Text = Main.RenderSubmissionReport(Submission, Format)
+            Report.WriteReport(FilePath, Text, Force=Force)
+        except (Main.P00PError, Report.ReportError, OSError) as Exc:
+            self.requestSound("error")
+            QMessageBox.critical(None, "REPORT ERROR", str(Exc))
+            return False
+        self._set_status(f"SAFE REPORT EXPORTED // {FilePath.name}")
+        self.requestSound("backup")
+        return True
+
+    @Slot(result=bool)
+    def mergeAnotherVault(self):
+        if not self.hasVault:
+            self._set_status("NO VAULT OPEN ON THE LEFT SIDE TO MERGE")
+            self.requestSound("error")
+            return False
+        RightFilename, _ = QFileDialog.getOpenFileName(
+            None,
+            "CHOOSE THE RIGHT-SIDE BOWL",
+            str(self.FilePath.parent),
+            "p00p vaults (*.p00p *.poop);;All files (*)",
+        )
+        if not RightFilename:
+            return False
+        Policy, Accepted = QInputDialog.getItem(
+            None,
+            "WHAT IF NAMES COLLIDE?",
+            "CONFLICT POLICY",
+            Merge.POLICIES,
+            0,
+            False,
+        )
+        if not Accepted:
+            return False
+        Suggested = self.FilePath.with_name(f"{self.FilePath.stem}-merged.p00p")
+        OutputFilename, _ = QFileDialog.getSaveFileName(
+            None,
+            "SAVE THE THIRD BOWL",
+            str(Suggested),
+            "p00p vaults (*.p00p *.poop);;All files (*)",
+        )
+        if not OutputFilename:
+            return False
+        OutputPath = Path(OutputFilename)
+        if not OutputPath.suffix:
+            OutputPath = OutputPath.with_suffix(".p00p")
+        Force = False
+        if OutputPath.exists():
+            Answer = QMessageBox.warning(
+                None,
+                "REPLACE EXISTING THIRD BOWL?",
+                f"{OutputPath.name} already exists. replace it with the merged bowl?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if Answer != QMessageBox.StandardButton.Yes:
+                return False
+            Force = True
+        try:
+            Receipt = Main.MergeVaultFiles(
+                LeftPath=self.FilePath,
+                RightPath=Path(RightFilename),
+                OutputPath=OutputPath,
+                Policy=str(Policy),
+                Force=Force,
+            )
+        except (
+            Main.P00PError,
+            Merge.MergeError,
+            Lifeboat.LifeboatError,
+            OSError,
+        ) as Exc:
+            self.requestSound("error")
+            QMessageBox.critical(None, "BOWL MERGE ERROR", str(Exc))
+            return False
+        self._set_status(
+            f"MERGED THIRD BOWL // {Receipt.FinalEntries} ENTRIES // {OutputPath.name}"
+        )
+        self.requestSound("backup")
+        return True
+
+    @Slot(result=bool)
+    def stampVaultSeal(self):
+        if not self.hasVault:
+            self._set_status("NO VAULT OPEN TO STAMP")
+            self.requestSound("error")
+            return False
+        SealPath = Seal.SuggestedSealPath(self.FilePath)
+        Force = False
+        if SealPath.exists():
+            Answer = QMessageBox.warning(
+                None,
+                "RESTAMP THIS BOWL?",
+                f"{SealPath.name} already exists. replace it with the current byte identity?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if Answer != QMessageBox.StandardButton.Yes:
+                return False
+            Force = True
+        try:
+            _Destination, Document = Main.CreateVaultSeal(
+                self.FilePath,
+                SealPath=SealPath,
+                Force=Force,
+            )
+        except (
+            Main.P00PError,
+            Seal.SealError,
+            Lifeboat.LifeboatError,
+            OSError,
+        ) as Exc:
+            self.requestSound("error")
+            QMessageBox.critical(None, "SEAL STAMP ERROR", str(Exc))
+            return False
+        self.SealSummary = (
+            f"STAMPED // {Document['vault_sha256'][:12]}... // {SealPath.name}"
+        )
+        self.utilityChanged.emit()
+        self._set_status("TOILET-WAX BYTE SEAL STAMPED")
+        self.requestSound("backup")
+        return True
+
+    @Slot(result=bool)
+    def verifyVaultSeal(self):
+        if not self.hasVault:
+            self._set_status("NO VAULT OPEN TO VERIFY")
+            self.requestSound("error")
+            return False
+        SealPath = Seal.SuggestedSealPath(self.FilePath)
+        try:
+            Result = Main.VerifyVaultSeal(self.FilePath, SealPath)
+        except (Main.P00PError, Seal.SealError, OSError) as Exc:
+            self.SealSummary = "SEAL CHECK COULD NOT RUN"
+            self.utilityChanged.emit()
+            self.requestSound("error")
+            QMessageBox.critical(None, "SEAL VERIFY ERROR", str(Exc))
+            return False
+        Failed = sum(not Check["passed"] for Check in Result.Checks)
+        if Result.Passed:
+            self.SealSummary = f"PASS // EXACT BYTE MATCH // {SealPath.name}"
+            self._set_status("SEAL VERIFIED // EXACT BOWL MATCH")
+            self.requestSound("doctor")
+        else:
+            self.SealSummary = f"FAIL // {Failed} SEAL CHECK(S) FAILED"
+            self._set_status("SEAL BROKEN // CURRENT BOWL DOES NOT MATCH")
+            self.requestSound("error")
+            QMessageBox.warning(
+                None,
+                "SEAL BROKEN",
+                Result.AsText(),
+                QMessageBox.StandardButton.Ok,
+                QMessageBox.StandardButton.Ok,
+            )
+        self.utilityChanged.emit()
+        return Result.Passed
 
     #MARK: vault picker stuffs
     @Slot()
@@ -467,8 +1010,32 @@ class VaultBackend(QObject):
             return
         self.SelectedName = Name
         # changing rows should immediately cover whatever password was revealed before.
-        self.PasswordVisible = False
+        self._cover_password()
         self.selectionChanged.emit()
+
+    @Slot(int)
+    def selectRow(self, Index):
+        Rows = self._rows()
+        if not Rows:
+            return
+        Index = max(0, min(int(Index), len(Rows) - 1))
+        self.SelectedName = Rows[Index]["name"]
+        self._cover_password()
+        self.selectionChanged.emit()
+        self.selectionMoved.emit(Index)
+
+    @Slot(int)
+    def selectRelative(self, Offset):
+        Rows = self._rows()
+        if not Rows:
+            return
+        Names = [Row["name"] for Row in Rows]
+        try:
+            CurrentIndex = Names.index(self.SelectedName)
+        except ValueError:
+            CurrentIndex = -1 if int(Offset) >= 0 else 0
+        # wrapping makes a long keyboard trip predictable instead of getting stuck.
+        self.selectRow((CurrentIndex + int(Offset)) % len(Rows))
 
     @Slot(result="QVariantMap")
     def selectedEntry(self):
@@ -494,6 +1061,55 @@ class VaultBackend(QObject):
             self.requestSound("error")
             QMessageBox.warning(None, "GENERATOR ERROR", str(Exc))
             return ""
+
+    #MARK: undo timeline stuffs
+    def _remember_change(self, Label, OldVault, OldSelection):
+        self.History.Remember(Label, OldVault, OldSelection)
+        self.historyChanged.emit()
+
+    def _apply_history_move(self, Direction):
+        if self.Vault is None:
+            return False
+        if Direction == "undo":
+            Move = self.History.PlanUndo(self.Vault, self.SelectedName)
+        else:
+            Move = self.History.PlanRedo(self.Vault, self.SelectedName)
+        if Move is None:
+            self._set_status(f"NOTHING TO {Direction.upper()}")
+            return False
+
+        LiveVault = self.Vault
+        LiveSelection = self.SelectedName
+        self.Vault = Copy.deepcopy(Move.Target.Vault)
+        CandidateSelection = Move.Target.SelectedName
+        Names = sorted(self.Vault.get("entries", {}), key=str.casefold)
+        self.SelectedName = (
+            CandidateSelection
+            if CandidateSelection in self.Vault.get("entries", {})
+            else (Names[0] if Names else "")
+        )
+        if not self._save():
+            # the history stacks do not move until the old/new bowl really reaches disk.
+            self.Vault = LiveVault
+            self.SelectedName = LiveSelection
+            return False
+
+        self.History.Commit(Move)
+        self._cover_password()
+        self._set_status(f"{Direction.upper()} // {Move.Target.Label}")
+        self.requestSound("entry_save")
+        self.entriesChanged.emit()
+        self.selectionChanged.emit()
+        self.historyChanged.emit()
+        return True
+
+    @Slot(result=bool)
+    def undo(self):
+        return self._apply_history_move("undo")
+
+    @Slot(result=bool)
+    def redo(self):
+        return self._apply_history_move("redo")
 
     #MARK: entry stuffs
     @Slot(str, str, str, str, result=bool)
@@ -521,13 +1137,15 @@ class VaultBackend(QObject):
             "updated_at": Main.CurrentTime(),
         }
         Original = self.Vault
+        OriginalSelection = self.SelectedName
         self.Vault = Working
         if not self._save():
             # put the old bowl back if the new one never reached disk.
             self.Vault = Original
             return False
+        self._remember_change(f"ADD {CleanName}", Original, OriginalSelection)
         self.SelectedName = CleanName
-        self.PasswordVisible = False
+        self._cover_password()
         self._set_status(f"ADDED {CleanName}")
         self.requestSound("entry_save")
         self.entriesChanged.emit()
@@ -563,12 +1181,14 @@ class VaultBackend(QObject):
             "updated_at": Main.CurrentTime(),
         }
         Original = self.Vault
+        OriginalSelection = self.SelectedName
         self.Vault = Working
         if not self._save():
             self.Vault = Original
             return False
+        self._remember_change(f"EDIT {OriginalName}", Original, OriginalSelection)
         self.SelectedName = CleanName
-        self.PasswordVisible = False
+        self._cover_password()
         self._set_status(f"UPDATED {CleanName}")
         self.requestSound("entry_save")
         self.entriesChanged.emit()
@@ -590,14 +1210,16 @@ class VaultBackend(QObject):
         Working = Copy.deepcopy(self.Vault)
         Working["entries"].pop(RemovedName)
         Original = self.Vault
+        OriginalSelection = self.SelectedName
         self.Vault = Working
         if not self._save():
             self.Vault = Original
             return
+        self._remember_change(f"REMOVE {RemovedName}", Original, OriginalSelection)
         Names = sorted(self.Vault["entries"], key=str.casefold)
         # land on the first remaining row so the details panel never points at a ghost.
         self.SelectedName = Names[0] if Names else ""
-        self.PasswordVisible = False
+        self._cover_password()
         self._set_status(f"REMOVED {RemovedName}")
         self.requestSound("entry_remove")
         self.entriesChanged.emit()
@@ -611,7 +1233,8 @@ class VaultBackend(QObject):
         Answer = QMessageBox.warning(
             None,
             "DELETE EVERY ENTRY",
-            f"DELETE ALL {Count} ENTRIES FROM THIS VAULT?\n\nTHIS CANNOT BE UNDONE.",
+            f"DELETE ALL {Count} ENTRIES FROM THIS VAULT?\n\n"
+            "U CAN UNDO IT UNTIL THE APP CLOSES OR ANOTHER VAULT OPENS.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
@@ -620,12 +1243,16 @@ class VaultBackend(QObject):
         Working = Copy.deepcopy(self.Vault)
         Working["entries"].clear()
         Original = self.Vault
+        OriginalSelection = self.SelectedName
         self.Vault = Working
         if not self._save():
             self.Vault = Original
             return False
+        self._remember_change(
+            f"DELETE ALL {Count} ENTRIES", Original, OriginalSelection
+        )
         self.SelectedName = ""
-        self.PasswordVisible = False
+        self._cover_password()
         self._set_status(f"DELETED ALL {Count} ENTRIES")
         self.requestSound("delete_all")
         self.entriesChanged.emit()
@@ -634,13 +1261,23 @@ class VaultBackend(QObject):
 
     #MARK: clipboard stuffs
     def _clear_clipboard_later(self, Text):
-        def Clear():
-            Clipboard = QGuiApplication.clipboard()
-            # do not erase something the user copied after the password.
-            if Clipboard.text() == Text:
-                Clipboard.clear()
-                self._set_status("CLIPBOARD CLEARED")
-        QTimer.singleShot(self.ClipboardSeconds * 1000, Clear)
+        self.ClipboardText = Text
+        # start() resets this exact timer, including when the copied text is identical.
+        self.ClipboardTimer.start(self.ClipboardSeconds * 1000)
+
+    def _clear_clipboard_if_unchanged(self):
+        Clipboard = QGuiApplication.clipboard()
+        # do not erase something the user copied after p00p put its thingy in there.
+        if self.ClipboardText and Clipboard.text() == self.ClipboardText:
+            Clipboard.clear()
+            self._set_status("CLIPBOARD CLEARED")
+        self.ClipboardText = ""
+
+    @Slot()
+    def clearOwnedClipboard(self):
+        # quitting should not strand a copied password forever, but never eat a newer copy.
+        self.ClipboardTimer.stop()
+        self._clear_clipboard_if_unchanged()
 
     @Slot()
     def copyUsername(self):
@@ -649,7 +1286,7 @@ class VaultBackend(QObject):
             return
         QGuiApplication.clipboard().setText(Text)
         self._clear_clipboard_later(Text)
-        self._set_status("USERNAME COPIED FOR 20 SECONDS")
+        self._set_status(f"USERNAME COPIED FOR {self.ClipboardSeconds} SECONDS")
         self.requestSound("copy")
 
     @Slot()
@@ -659,11 +1296,13 @@ class VaultBackend(QObject):
             return
         QGuiApplication.clipboard().setText(Text)
         self._clear_clipboard_later(Text)
-        self._set_status("PASSWORD COPIED FOR 20 SECONDS")
+        self._set_status(f"PASSWORD COPIED FOR {self.ClipboardSeconds} SECONDS")
         self.requestSound("copy")
 
     @Slot()
     def clearClipboard(self):
+        self.ClipboardTimer.stop()
+        self.ClipboardText = ""
         QGuiApplication.clipboard().clear()
         self._set_status("CLIPBOARD CLEARED")
         self.requestSound("hide")
@@ -672,17 +1311,72 @@ class VaultBackend(QObject):
     def togglePassword(self):
         if not self._entry():
             return
-        self.PasswordVisible = not self.PasswordVisible
-        self.requestSound("reveal" if self.PasswordVisible else "hide")
-        self.selectionChanged.emit()
         if self.PasswordVisible:
-            # revealed means revealed briefly, not until the app gets forgotten.
-            QTimer.singleShot(self.RevealSeconds * 1000, self._hide_password)
+            self._cover_password(Emit=True)
+            self._set_status("PASSWORD HIDDEN")
+            self.requestSound("hide")
+            return
+        self.PasswordVisible = True
+        self.selectionChanged.emit()
+        self._set_status(f"PASSWORD REVEALED FOR {self.RevealSeconds} SECONDS")
+        self.requestSound("reveal")
+        # revealed means revealed briefly, not until the app gets forgotten.
+        self.RevealTimer.start(self.RevealSeconds * 1000)
+
+    def _cover_password(self, Emit=False):
+        self.RevealTimer.stop()
+        WasVisible = self.PasswordVisible
+        self.PasswordVisible = False
+        if Emit and WasVisible:
+            self.selectionChanged.emit()
+        return WasVisible
 
     def _hide_password(self):
-        if self.PasswordVisible:
-            self.PasswordVisible = False
-            self.selectionChanged.emit()
+        self._cover_password(Emit=True)
+
+    def _restart_idle_timer(self):
+        if self.hasVault and not self.PrivacyCurtain and QtTimersAvailable():
+            self.IdleTimer.start(self.IdleSeconds * 1000)
+        else:
+            self.IdleTimer.stop()
+
+    def _idle_curtain_timeout(self):
+        self.dropPrivacyCurtain("IDLE TIMER")
+
+    @Slot()
+    def registerActivity(self):
+        # mouse wiggles and keyboard taps only postpone the curtain. they never lift it.
+        if not self.PrivacyCurtain:
+            self._restart_idle_timer()
+
+    @Slot(str, result=bool)
+    def dropPrivacyCurtain(self, Reason="MANUAL"):
+        if not self.hasVault or self.PrivacyCurtain:
+            return False
+        self.PrivacyCurtain = True
+        self.IdleTimer.stop()
+        self._cover_password(Emit=True)
+        self.clearOwnedClipboard()
+        self.privacyChanged.emit()
+        self._set_status(f"PRIVACY CURTAIN DROPPED // {Reason}")
+        self.requestSound("hide")
+        return True
+
+    @Slot(result=bool)
+    def liftPrivacyCurtain(self):
+        if not self.PrivacyCurtain:
+            return False
+        self.PrivacyCurtain = False
+        self.privacyChanged.emit()
+        self._restart_idle_timer()
+        self._set_status("PRIVACY CURTAIN LIFTED // NOT AN AUTHENTICATION CHECK")
+        self.requestSound("ui_click")
+        return True
+
+    @Slot()
+    def coverForPrivacy(self):
+        if self._cover_password(Emit=True):
+            self._set_status("PASSWORD HIDDEN WHEN WINDOW LEFT")
 
     @Slot(bool)
     def setCustomCursorActive(self, Active):
@@ -692,9 +1386,20 @@ class VaultBackend(QObject):
 
 #MARK: fake mouse stuffs
 class CursorEventFilter(QObject):
-    def __init__(self, Window):
+    ACTIVITY_EVENTS = frozenset((
+        QEvent.Type.MouseButtonPress,
+        QEvent.Type.MouseButtonRelease,
+        QEvent.Type.MouseMove,
+        QEvent.Type.KeyPress,
+        QEvent.Type.Wheel,
+        QEvent.Type.TouchBegin,
+        QEvent.Type.TouchUpdate,
+    ))
+
+    def __init__(self, Window, Backend=None):
         super().__init__(Window)
         self.Window = Window
+        self.Backend = Backend
         self.OverrideActive = False
 
     def setActive(self, Active):
@@ -719,6 +1424,8 @@ class CursorEventFilter(QObject):
 
     def eventFilter(self, Watched, Event):
         EventType = Event.type()
+        if self.Backend is not None and EventType in self.ACTIVITY_EVENTS:
+            self.Backend.registerActivity()
         if EventType == QEvent.Type.MouseButtonPress:
             # first click opts into the tic-80-ish cursor for this window.
             self._move_pointer(Event)
@@ -738,8 +1445,13 @@ class CursorEventFilter(QObject):
             self.setActive(False)
         elif EventType == QEvent.Type.WindowDeactivate:
             self.setActive(False)
+            # cmd-tab should cover a revealed password before another app gets the screen.
+            if self.Backend is not None:
+                self.Backend.coverForPrivacy()
         elif EventType == QEvent.Type.WindowActivate:
             self.setActive(bool(self.Window.property("customCursorActive")))
+            if self.Backend is not None:
+                self.Backend.registerActivity()
         return super().eventFilter(Watched, Event)
 
 
@@ -754,15 +1466,16 @@ def RunQtGui(StartPath=None):
     App.setApplicationName("p00p weird storage")
     Engine = QQmlApplicationEngine()
     Backend = VaultBackend(StartPath=StartPath)
-    # one hookup for every sound. replace HandleSoundCue when ur audio goblin is ready.
+    # one hookup for every procedural retro beep in the audio goblin.
     Backend.soundRequested.connect(HandleSoundCue)
+    App.aboutToQuit.connect(Backend.clearOwnedClipboard)
     # qml gets one boring backend object instead of importing python spaghetti.
     Engine.rootContext().setContextProperty("backend", Backend)
     Engine.load(QUrl.fromLocalFile(str(QML_FILE)))
     if not Engine.rootObjects():
         return 1
     RootWindow = Engine.rootObjects()[0]
-    Backend.CursorFilter = CursorEventFilter(RootWindow)
+    Backend.CursorFilter = CursorEventFilter(RootWindow, Backend)
     RootWindow.installEventFilter(Backend.CursorFilter)
     return App.exec()
 

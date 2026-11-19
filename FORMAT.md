@@ -85,9 +85,36 @@ it rejects the file if:
 - the SHA-256 digest doesnt match
 - the payload wont turn into valid UTF-8 JSON
 - the JSON doesnt have a valid P00P entry table
+- the file or decoded payload crosses the configured anti-zip-bomb limits
+
+after a successful decode, `python3 main.py doctor` runs a second, non-destructive
+diagnostic layer over the filename, permissions, envelope, timestamps, string
+camouflage, compression ratio, and aggregate credential hygiene. its JSON mode
+is meant for scripts and intentionally reports counts instead of credential
+values. `--fix-permissions` is the one explicit repair and only applies mode
+`600` to the requested vault file
 
 the digest is good for noticing corruption + uncomplicated tampering. it is not
 a proper message authentication code because there is no secret key involved
+
+## the optional bowl ledger sidecar
+
+`python3 main.py ledger --record checkpoint` can make a separate
+`<vault>.ledger.jsonl` file. every line is one compact JSON record with an
+increasing sequence number, one fixed action name, a timestamp, the vault's
+filename/size/entry count/SHA-256, the previous record hash, and its own hash.
+the first line points at 64 zeroes. later lines point at the exact canonical
+hash of the line before them, which makes missing or edited middle records loud
+
+the action is selected from a small built-in list instead of accepting comments.
+that is intentional: free-form notes are a surprisingly easy way to paste a
+password into supposedly secret-safe paperwork. the sidecar never stores the
+vault payload or any decoded entry field
+
+this is a checksum chain, not an authenticated audit log. there is no private
+key, so an attacker who can rewrite both the bowl and ledger can rebuild a valid
+chain. the validator is for accidental changes, busted demos, and learning how
+append-style storage works without pretending SHA-256 alone creates trust
 
 ## security stuff so nobody gets the wrong idea
 

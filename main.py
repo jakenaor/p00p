@@ -11,6 +11,7 @@
 # anti-hacker stuffs
 
 import argparse as Argparse
+import copy as Copy
 import getpass as Getpass
 import hashlib as Hashlib
 import json as Json
@@ -27,6 +28,17 @@ from pathlib import Path
 
 import poopline as Poopline
 import theater as Theater
+import doctor as Doctor
+import lifeboat as Lifeboat
+import compare as Compare
+import decoy as Decoy
+import reroll as Reroll
+import bowlstats as BowlStats
+import report as Report
+import merge as Merge
+import seal as Seal
+import lab as Lab
+import ledger as Ledger
 
 # add common passwords. if the file falls out of the package the rest of the
 # app should still open, it just loses one giant wall of bad-password knowledge.
@@ -44,6 +56,15 @@ DEFAULT_PASSWORD_LENGTH = 24
 MIN_PASSWORD_LENGTH = 12
 MAX_PASSWORD_LENGTH = 256
 PASSWORD_SYMBOLS = "!@#$%^&*()-_=+[]{}:,.?"
+# a password bowl should not secretly be a 12gb zip bomb wearing a funny hat.
+MAX_VAULT_FILE_SIZE = 16 * 1024 * 1024
+MAX_VAULT_DECODED_SIZE = 32 * 1024 * 1024
+MAX_ENTRY_COUNT = 100_000
+MAX_ENTRY_NAME_LENGTH = 256
+MAX_USERNAME_LENGTH = 4_096
+MAX_STORED_PASSWORD_LENGTH = 16_384
+MAX_NOTES_LENGTH = 1_048_576
+SUBMISSION_LAB_ROUNDS = 10
 
 
 def LoadCommonPasswords(FilePath=COMMON_PASSWORDS_PATH):
@@ -92,9 +113,13 @@ def Camouflage(Data, Salt):
 def EncodeVault(Vault, Salt=None):
     # reject cursed shapes before they become a cursed file forever.
     ValidateVault(Vault)
-    Salt = Salt or Secrets.token_bytes(SALT_SIZE)
+    Salt = Secrets.token_bytes(SALT_SIZE) if Salt is None else Salt
+    if not isinstance(Salt, bytes) or len(Salt) != SALT_SIZE:
+        raise P00PError(f"vault salt must be exactly {SALT_SIZE} bytes")
     # sorted compact json makes the same vault predictable before the random salt touches it.
     Raw = Json.dumps(Vault, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    if len(Raw) > MAX_VAULT_DECODED_SIZE:
+        raise P00PError("the vault contents are too huge to save")
     Payload = Camouflage(Zlib.compress(Raw, level=9), Salt)
     Header = MAGIC + bytes([VERSION]) + Salt + Struct.pack(">I", len(Payload))
     # this catches damage and tampering. it does not magically make this encryption.
@@ -104,6 +129,8 @@ def EncodeVault(Vault, Salt=None):
 
 def DecodeVault(Blob):
     # check every boundary before slicing so half a file cannot pretend to be a vault.
+    if len(Blob) > MAX_VAULT_FILE_SIZE:
+        raise P00PError("the vault file is suspiciously huge")
     MinimumSize = len(MAGIC) + 1 + SALT_SIZE + 4 + DIGEST_SIZE
     if len(Blob) < MinimumSize or not Blob.startswith(MAGIC):
         raise P00PError("that is not a valid .p00p file")
@@ -130,8 +157,20 @@ def DecodeVault(Blob):
         raise P00PError("the vault is corrupted (integrity check failed)")
 
     try:
-        Raw = Zlib.decompress(Camouflage(Payload, Salt))
+        Compressed = Camouflage(Payload, Salt)
+        Decoder = Zlib.decompressobj()
+        Raw = Decoder.decompress(Compressed, MAX_VAULT_DECODED_SIZE + 1)
+        # unconsumed input after hitting the cap means more output was waiting to explode.
+        if len(Raw) > MAX_VAULT_DECODED_SIZE or Decoder.unconsumed_tail:
+            raise P00PError("the vault payload expands past the safety limit")
+        Raw += Decoder.flush()
+        if len(Raw) > MAX_VAULT_DECODED_SIZE:
+            raise P00PError("the vault payload expands past the safety limit")
+        if not Decoder.eof or Decoder.unused_data:
+            raise P00PError("the vault payload has invalid compressed data")
         Vault = Json.loads(Raw.decode("utf-8"))
+    except P00PError:
+        raise
     except (Zlib.error, UnicodeDecodeError, Json.JSONDecodeError) as Exc:
         raise P00PError("the vault payload could not be decoded") from Exc
 
@@ -156,12 +195,29 @@ def ValidateVault(Vault):
     Entries = Vault.get("entries")
     if not isinstance(Entries, dict):
         raise P00PError("the vault has an invalid entries table")
+    if len(Entries) > MAX_ENTRY_COUNT:
+        raise P00PError("the vault contains too many entries")
+    for Field in ("created_at", "updated_at"):
+        if Field in Vault and not isinstance(Vault[Field], str):
+            raise P00PError(f"the vault has an invalid {Field}")
     for Name, Entry in Entries.items():
         if not isinstance(Name, str) or not Name.strip() or not isinstance(Entry, dict):
             raise P00PError("the vault contains a malformed entry")
-        for Field in ("username", "password", "notes"):
-            if not isinstance(Entry.get(Field, ""), str):
+        if len(Name) > MAX_ENTRY_NAME_LENGTH:
+            raise P00PError(f"entry name is longer than {MAX_ENTRY_NAME_LENGTH} characters")
+        Limits = {
+            "username": MAX_USERNAME_LENGTH,
+            "password": MAX_STORED_PASSWORD_LENGTH,
+            "notes": MAX_NOTES_LENGTH,
+        }
+        for Field, Limit in Limits.items():
+            Value = Entry.get(Field, "")
+            if not isinstance(Value, str):
                 raise P00PError(f"entry {Name!r} has an invalid {Field}")
+            if len(Value) > Limit:
+                raise P00PError(f"entry {Name!r} has an oversized {Field}")
+        if "updated_at" in Entry and not isinstance(Entry["updated_at"], str):
+            raise P00PError(f"entry {Name!r} has an invalid updated_at")
 
 
 #MARK: file guts
@@ -195,7 +251,15 @@ def ReadVaultBlob(FilePath):
     if not FilePath.is_file():
         raise P00PError(f"vault is not a regular file: {FilePath}")
     try:
-        return FilePath.read_bytes()
+        if FilePath.stat().st_size > MAX_VAULT_FILE_SIZE:
+            raise P00PError(f"vault is suspiciously huge: {FilePath}")
+        Blob = FilePath.read_bytes()
+        # check again because another process can replace or grow it between stat and read.
+        if len(Blob) > MAX_VAULT_FILE_SIZE:
+            raise P00PError(f"vault is suspiciously huge: {FilePath}")
+        return Blob
+    except P00PError:
+        raise
     except OSError as Exc:
         raise P00PError(f"could not read {FilePath}: {Exc}") from Exc
 
@@ -206,8 +270,13 @@ def LoadVault(FilePath):
 
 def SaveVault(FilePath, Vault):
     FilePath.parent.mkdir(parents=True, exist_ok=True)
-    Vault["updated_at"] = CurrentTime()
-    Encoded = EncodeVault(Vault)
+    # encode a copy first. a disk tantrum should not lie about when the live bowl saved.
+    Working = Copy.deepcopy(Vault)
+    SavedAt = CurrentTime()
+    Working["updated_at"] = SavedAt
+    Encoded = EncodeVault(Working)
+    if len(Encoded) > MAX_VAULT_FILE_SIZE:
+        raise P00PError("the vault is too huge to save")
     TemporaryName = None
     try:
         # write beside the real vault, fsync it, then swap it in all at once.
@@ -221,6 +290,7 @@ def SaveVault(FilePath, Vault):
         Os.chmod(TemporaryName, 0o600)
         # replace is atomic on the same filesystem, unlike writing over the live file.
         Os.replace(TemporaryName, FilePath)
+        Vault["updated_at"] = SavedAt
     except OSError as Exc:
         if TemporaryName:
             try:
@@ -234,6 +304,8 @@ def NormalizeName(Name):
     Cleaned = Name.strip()
     if not Cleaned:
         raise P00PError("entry names cannot be empty")
+    if len(Cleaned) > MAX_ENTRY_NAME_LENGTH:
+        raise P00PError(f"entry names cannot exceed {MAX_ENTRY_NAME_LENGTH} characters")
     return Cleaned
 
 
@@ -478,6 +550,373 @@ def CommandAudit(Args):
     print("reality check: camouflage still is not encryption")
 
 
+#MARK: doctor stuffs
+def VaultDoctorReport(FilePath):
+    FilePath = Path(FilePath)
+    Blob = ReadVaultBlob(FilePath)
+    Header = ParseHeader(Blob)
+    Vault = DecodeVault(Blob)
+    Context = Doctor.DoctorContext(
+        FilePath=FilePath,
+        Blob=Blob,
+        Header=Header,
+        Vault=Vault,
+        PasswordIssueFinder=PasswordIssues,
+        ExpectedVersion=VERSION,
+        MaximumFileSize=MAX_VAULT_FILE_SIZE,
+    )
+    return Doctor.ExamineVault(Context)
+
+
+def CommandDoctor(Args):
+    if Args.fix_permissions:
+        try:
+            Mode = Doctor.RepairOwnerOnlyPermissions(Args.vault)
+        except OSError as Exc:
+            raise P00PError(f"could not repair vault permissions: {Exc}") from Exc
+        if not Args.json:
+            print(f"permission repair: set {Args.vault} to {Mode:03o}")
+    Report = VaultDoctorReport(Args.vault)
+    print(Report.AsJson() if Args.json else Report.AsText())
+
+
+#MARK: lifeboat stuffs
+def CommandBackup(Args):
+    Source = Path(Args.vault)
+    Blob = ReadVaultBlob(Source)
+    Vault = DecodeVault(Blob)
+    Destination = (
+        Path(Args.destination)
+        if Args.destination is not None
+        else Lifeboat.SuggestedSnapshotPath(Source)
+    )
+    Receipt = Lifeboat.Launch(
+        Source=Source,
+        Destination=Destination,
+        Blob=Blob,
+        EntryCount=len(Vault["entries"]),
+        Force=Args.force,
+        Action="backup",
+    )
+    print(Receipt.AsJson() if Args.json else Receipt.AsText())
+
+
+def CommandRestore(Args):
+    Source = Path(Args.source)
+    Blob = ReadVaultBlob(Source)
+    Vault = DecodeVault(Blob)
+    Receipt = Lifeboat.Launch(
+        Source=Source,
+        Destination=Args.vault,
+        Blob=Blob,
+        EntryCount=len(Vault["entries"]),
+        Force=Args.force,
+        Action="restore",
+    )
+    print(Receipt.AsJson() if Args.json else Receipt.AsText())
+
+
+#MARK: difference engine stuffs
+def CommandDiff(Args):
+    LeftPath = Path(Args.vault)
+    RightPath = Path(Args.other)
+    LeftVault = LoadVault(LeftPath)
+    RightVault = LoadVault(RightPath)
+    Difference = Compare.CompareVaults(
+        LeftVault,
+        RightVault,
+        LeftPath=LeftPath,
+        RightPath=RightPath,
+    )
+    if Args.json:
+        print(Difference.AsJson(Anonymous=Args.anonymous))
+    else:
+        print(Difference.AsText(Anonymous=Args.anonymous))
+
+
+#MARK: fake fake password stuffs
+def CommandDecoy(Args):
+    FilePath = Path(Args.vault)
+    if FilePath.exists() and not Args.force:
+        raise P00PError(
+            f"vault already exists: {FilePath} (use --force to replace it with decoys)"
+        )
+    Vault = NewVault()
+    Recipe = Decoy.DecoyRecipe(Count=Args.count, Seed=Args.seed)
+    Decoy.DecoyFactory(Recipe, CurrentTime).FillVault(Vault)
+    SaveVault(FilePath, Vault)
+    Receipt = Decoy.DecoyReceipt(FilePath, Recipe.Count, Recipe.Deterministic)
+    print(Receipt.AsJson() if Args.json else Receipt.AsText())
+
+
+#MARK: new binary soup same old fake secrets
+def RerollVault(FilePath):
+    FilePath = Path(FilePath)
+    BeforeBlob = ReadVaultBlob(FilePath)
+    Header = ParseHeader(BeforeBlob)
+    Vault = DecodeVault(BeforeBlob)
+    NewSalt = Reroll.FreshSalt(Header["salt"], SALT_SIZE)
+    AfterBlob = EncodeVault(Vault, Salt=NewSalt)
+    if len(AfterBlob) > MAX_VAULT_FILE_SIZE:
+        raise P00PError("rerolled vault somehow crossed the file safety limit")
+    # AtomicDock writes beside the live bowl, fsyncs, chmods, then swaps it in.
+    Lifeboat.AtomicDock(FilePath, Force=True).Install(AfterBlob)
+    return Reroll.RerollReceipt(
+        FilePath=FilePath,
+        BeforeBlob=BeforeBlob,
+        AfterBlob=AfterBlob,
+        OldSalt=Header["salt"],
+        NewSalt=NewSalt,
+        EntryCount=len(Vault["entries"]),
+    )
+
+
+def CommandReroll(Args):
+    Receipt = RerollVault(Args.vault)
+    print(Receipt.AsJson() if Args.json else Receipt.AsText())
+
+
+#MARK: bowl counting stuffs
+def BowlStatisticsReport(FilePath):
+    FilePath = Path(FilePath)
+    Blob = ReadVaultBlob(FilePath)
+    Header = ParseHeader(Blob)
+    Vault = DecodeVault(Blob)
+    return BowlStats.BowlStatistics(
+        FilePath=FilePath,
+        Vault=Vault,
+        Blob=Blob,
+        Header=Header,
+        PasswordIssueFinder=PasswordIssues,
+    )
+
+
+def CommandStats(Args):
+    Report = BowlStatisticsReport(Args.vault)
+    print(Report.AsJson() if Args.json else Report.AsText())
+
+
+#MARK: repeatable weird storage science fair stuffs
+def StorageLabForVault(FilePath, Rounds=Lab.DEFAULT_ROUNDS):
+    Vault = LoadVault(Path(FilePath))
+    return Lab.RunStorageLab(
+        Vault=Vault,
+        Rounds=Rounds,
+        EncodeFunction=EncodeVault,
+        DecodeFunction=DecodeVault,
+        HeaderFunction=ParseHeader,
+    )
+
+
+def CommandLab(Args):
+    Result = StorageLabForVault(Args.vault, Args.rounds)
+    print(Result.AsJson() if Args.json else Result.AsText())
+    return 0 if Result.Passed else 2
+
+
+#MARK: one giant safe paperwork pile
+def SubmissionReportForVault(FilePath):
+    FilePath = Path(FilePath)
+    Blob = ReadVaultBlob(FilePath)
+    Header = ParseHeader(Blob)
+    Vault = DecodeVault(Blob)
+    DoctorReport = VaultDoctorReport(FilePath)
+    StatisticsReport = BowlStatisticsReport(FilePath)
+    TheaterReport = SecurityTheaterReport(FilePath)
+    LabReport = StorageLabForVault(FilePath, SUBMISSION_LAB_ROUNDS)
+    SafeHeader = {
+        "magic": "P00P\\0",
+        "header_size": Header["header_size"],
+        "payload_size": Header["payload_size"],
+        "file_size": Header["file_size"],
+        "salt": Header["salt"].hex(),
+        "digest": Header["digest"].hex(),
+    }
+    return Report.SubmissionReport(
+        FilePath=FilePath,
+        ProjectVersion=PROJECT_VERSION,
+        FormatVersion=VERSION,
+        Header=SafeHeader,
+        DoctorPayload=DoctorReport.AsDictionary(),
+        StatisticsPayload=StatisticsReport.AsDictionary(),
+        TheaterPayload=TheaterReport.AsDictionary(),
+        LabPayload=LabReport.AsDictionary(),
+        PooplineSummary=PayloadRitualSummary(Vault, Header["salt"]),
+    )
+
+
+def RenderSubmissionReport(Submission, Format):
+    if Format == "json":
+        return Submission.AsJson()
+    if Format == "text":
+        return Submission.AsText()
+    return Submission.AsMarkdown()
+
+
+def CommandReport(Args):
+    Submission = SubmissionReportForVault(Args.vault)
+    Text = RenderSubmissionReport(Submission, Args.format)
+    if Args.output is None:
+        print(Text)
+        return
+    Destination = Report.WriteReport(Args.output, Text, Force=Args.force)
+    print(f"wrote secret-safe {Args.format} report to {Destination}")
+
+
+#MARK: pouring two bowls into a third bowl
+def MergeVaultFiles(LeftPath, RightPath, OutputPath, Policy, Force=False):
+    LeftPath = Path(LeftPath)
+    RightPath = Path(RightPath)
+    OutputPath = Path(OutputPath)
+    if Lifeboat.PathsPointToSamePlace(OutputPath, LeftPath):
+        raise Merge.MergeError("merge output cannot replace the left input vault")
+    if Lifeboat.PathsPointToSamePlace(OutputPath, RightPath):
+        raise Merge.MergeError("merge output cannot replace the right input vault")
+    LeftVault = LoadVault(LeftPath)
+    RightVault = LoadVault(RightPath)
+    Plan, MergedVault = Merge.MergeVaults(
+        LeftVault,
+        RightVault,
+        Policy,
+        CurrentTime,
+    )
+    ValidateVault(MergedVault)
+    Encoded = EncodeVault(MergedVault)
+    Lifeboat.AtomicDock(OutputPath, Force=Force).Install(Encoded)
+    return Plan.Receipt(LeftPath, RightPath, OutputPath)
+
+
+def CommandMerge(Args):
+    Receipt = MergeVaultFiles(
+        LeftPath=Args.vault,
+        RightPath=Args.right,
+        OutputPath=Args.output,
+        Policy=Args.conflict,
+        Force=Args.force,
+    )
+    print(Receipt.AsJson() if Args.json else Receipt.AsText())
+
+
+#MARK: toilet-wax byte identity seal stuffs
+def CreateVaultSeal(VaultPath, SealPath=None, Force=False):
+    VaultPath = Path(VaultPath)
+    SealPath = Seal.SuggestedSealPath(VaultPath) if SealPath is None else Path(SealPath)
+    if Lifeboat.PathsPointToSamePlace(VaultPath, SealPath):
+        raise Seal.SealError("seal output cannot replace the vault it describes")
+    Blob = ReadVaultBlob(VaultPath)
+    Vault = DecodeVault(Blob)
+    Document = Seal.BuildSeal(
+        VaultPath=VaultPath,
+        Blob=Blob,
+        EntryCount=len(Vault["entries"]),
+        SealedAt=CurrentTime(),
+    )
+    Lifeboat.AtomicDock(SealPath, Force=Force).Install(Seal.EncodeSeal(Document))
+    return SealPath, Document
+
+
+def VerifyVaultSeal(VaultPath, SealPath=None):
+    VaultPath = Path(VaultPath)
+    SealPath = Seal.SuggestedSealPath(VaultPath) if SealPath is None else Path(SealPath)
+    Blob = ReadVaultBlob(VaultPath)
+    Vault = DecodeVault(Blob)
+    Document = Seal.ReadSeal(SealPath)
+    return Seal.VerifySeal(
+        Document,
+        SealPath=SealPath,
+        VaultPath=VaultPath,
+        Blob=Blob,
+        EntryCount=len(Vault["entries"]),
+    )
+
+
+def CommandSeal(Args):
+    SealPath, Document = CreateVaultSeal(
+        VaultPath=Args.vault,
+        SealPath=Args.output,
+        Force=Args.force,
+    )
+    if Args.json:
+        Receipt = {"seal_path": str(SealPath), **Document}
+        print(Json.dumps(Receipt, indent=2, sort_keys=True))
+        return
+    print("P00P TOILET-WAX SEAL STAMPED")
+    print(f"vault:   {Args.vault}")
+    print(f"seal:    {SealPath}")
+    print(f"bytes:   {Document['vault_bytes']}")
+    print(f"entries: {Document['entry_count']}")
+    print(f"sha256:  {Document['vault_sha256']}")
+    print("notice: byte identity is not encryption or authentication")
+
+
+def CommandVerifySeal(Args):
+    Result = VerifyVaultSeal(Args.vault, Args.seal_path)
+    print(Result.AsJson() if Args.json else Result.AsText())
+    return 0 if Result.Passed else 2
+
+
+#MARK: absurd hash-chained bowl paperwork
+def RecordVaultLedger(VaultPath, LedgerPath=None, Action="checkpoint"):
+    VaultPath = Path(VaultPath)
+    LedgerPath = (
+        Ledger.SuggestedLedgerPath(VaultPath)
+        if LedgerPath is None else Path(LedgerPath)
+    )
+    if Lifeboat.PathsPointToSamePlace(VaultPath, LedgerPath):
+        raise Ledger.LedgerError("ledger cannot replace the vault it describes")
+    Blob = ReadVaultBlob(VaultPath)
+    Vault = DecodeVault(Blob)
+    Records = Ledger.ReadLedger(LedgerPath) if LedgerPath.exists() else []
+    Records, _Record = Ledger.AppendRecord(
+        Records=Records,
+        VaultPath=VaultPath,
+        Blob=Blob,
+        EntryCount=len(Vault["entries"]),
+        Action=Action,
+        RecordedAt=CurrentTime(),
+    )
+    Encoded = Ledger.EncodeLedger(Records)
+    Lifeboat.AtomicDock(LedgerPath, Force=LedgerPath.exists()).Install(Encoded)
+    return Ledger.VerifyLedger(
+        Records,
+        LedgerPath=LedgerPath,
+        VaultPath=VaultPath,
+        Blob=Blob,
+        EntryCount=len(Vault["entries"]),
+    )
+
+
+def VerifyVaultLedger(VaultPath, LedgerPath=None):
+    VaultPath = Path(VaultPath)
+    LedgerPath = (
+        Ledger.SuggestedLedgerPath(VaultPath)
+        if LedgerPath is None else Path(LedgerPath)
+    )
+    Blob = ReadVaultBlob(VaultPath)
+    Vault = DecodeVault(Blob)
+    Records = Ledger.ReadLedger(LedgerPath)
+    return Ledger.VerifyLedger(
+        Records,
+        LedgerPath=LedgerPath,
+        VaultPath=VaultPath,
+        Blob=Blob,
+        EntryCount=len(Vault["entries"]),
+    )
+
+
+def CommandLedger(Args):
+    if Args.record is None:
+        Result = VerifyVaultLedger(Args.vault, Args.ledger_path)
+    else:
+        Result = RecordVaultLedger(
+            Args.vault,
+            LedgerPath=Args.ledger_path,
+            Action=Args.record,
+        )
+    print(Result.AsJson() if Args.json else Result.AsText())
+    return 0 if Result.Passed else 2
+
+
 #MARK: security theater stuffs
 def SecurityTheaterReport(FilePath):
     Blob = ReadVaultBlob(Path(FilePath))
@@ -705,6 +1144,203 @@ def BuildParser():
     AddVaultArgument(AuditParser)
     AuditParser.set_defaults(handler=CommandAudit)
 
+    DoctorParser = Subparsers.add_parser(
+        "doctor", help="run over-engineered diagnostics without revealing secrets"
+    )
+    AddVaultArgument(DoctorParser)
+    DoctorParser.add_argument(
+        "--json", action="store_true", help="print a machine-readable diagnostic report"
+    )
+    DoctorParser.add_argument(
+        "--fix-permissions",
+        action="store_true",
+        help="set the vault file to owner-read/write (600) before checking it",
+    )
+    DoctorParser.set_defaults(handler=CommandDoctor)
+
+    BackupParser = Subparsers.add_parser(
+        "backup", aliases=["lifeboat"], help="make an atomic byte-for-byte vault snapshot"
+    )
+    AddVaultArgument(BackupParser)
+    BackupParser.add_argument(
+        "destination",
+        nargs="?",
+        type=Path,
+        help="snapshot path (default: hidden timestamped .p00p beside the vault)",
+    )
+    BackupParser.add_argument(
+        "--force", action="store_true", help="replace an existing destination"
+    )
+    BackupParser.add_argument(
+        "--json", action="store_true", help="print a machine-readable lifeboat receipt"
+    )
+    BackupParser.set_defaults(handler=CommandBackup)
+
+    RestoreParser = Subparsers.add_parser(
+        "restore", help="atomically restore a validated lifeboat snapshot"
+    )
+    AddVaultArgument(RestoreParser)
+    RestoreParser.add_argument("source", type=Path, help="snapshot to restore")
+    RestoreParser.add_argument(
+        "--force", action="store_true", help="replace an existing destination vault"
+    )
+    RestoreParser.add_argument(
+        "--json", action="store_true", help="print a machine-readable lifeboat receipt"
+    )
+    RestoreParser.set_defaults(handler=CommandRestore)
+
+    DiffParser = Subparsers.add_parser(
+        "diff", aliases=["compare"], help="compare two decoded vaults without printing secrets"
+    )
+    AddVaultArgument(DiffParser)
+    DiffParser.add_argument("other", type=Path, help="other vault to compare against")
+    DiffParser.add_argument(
+        "--anonymous", action="store_true", help="hide entry names as well as credential values"
+    )
+    DiffParser.add_argument(
+        "--json", action="store_true", help="print a machine-readable difference report"
+    )
+    DiffParser.set_defaults(handler=CommandDiff)
+
+    DecoyParser = Subparsers.add_parser(
+        "decoy", aliases=["demo"], help="make a bowl full of unmistakably fake demo logins"
+    )
+    AddVaultArgument(DecoyParser)
+    DecoyParser.add_argument(
+        "-c", "--count", type=int, default=12,
+        help="number of fake entries (default: 12, maximum: 500)",
+    )
+    DecoyParser.add_argument(
+        "--seed", help="optional repeatable seed for screenshots and demos"
+    )
+    DecoyParser.add_argument(
+        "--force", action="store_true", help="replace an existing vault with decoys"
+    )
+    DecoyParser.add_argument(
+        "--json", action="store_true", help="print a machine-readable foundry receipt"
+    )
+    DecoyParser.set_defaults(handler=CommandDecoy)
+
+    RerollParser = Subparsers.add_parser(
+        "reroll", aliases=["repack"],
+        help="rewrap unchanged data with fresh random camouflage",
+    )
+    AddVaultArgument(RerollParser)
+    RerollParser.add_argument(
+        "--json", action="store_true", help="print a machine-readable reroll receipt"
+    )
+    RerollParser.set_defaults(handler=CommandReroll)
+
+    StatsParser = Subparsers.add_parser(
+        "stats", aliases=["count"],
+        help="show aggregate bowl statistics without printing credentials",
+    )
+    AddVaultArgument(StatsParser)
+    StatsParser.add_argument(
+        "--json", action="store_true", help="print machine-readable bowl statistics"
+    )
+    StatsParser.set_defaults(handler=CommandStats)
+
+    LabParser = Subparsers.add_parser(
+        "lab", aliases=["bench"],
+        help="benchmark and poke the weird format without printing credentials",
+    )
+    AddVaultArgument(LabParser)
+    LabParser.add_argument(
+        "-r", "--rounds", type=int, default=Lab.DEFAULT_ROUNDS,
+        help=f"encode/decode rounds (default: {Lab.DEFAULT_ROUNDS}, max: {Lab.MAX_ROUNDS})",
+    )
+    LabParser.add_argument(
+        "--json", action="store_true", help="print machine-readable lab results"
+    )
+    LabParser.set_defaults(handler=CommandLab)
+
+    ReportParser = Subparsers.add_parser(
+        "report", help="combine anatomy, doctor, stats, theater, and lab into one safe report"
+    )
+    AddVaultArgument(ReportParser)
+    ReportParser.add_argument(
+        "-f", "--format", choices=("text", "markdown", "json"), default="markdown",
+        help="report format (default: markdown)",
+    )
+    ReportParser.add_argument(
+        "-o", "--output", type=Path, help="write atomically instead of printing"
+    )
+    ReportParser.add_argument(
+        "--force", action="store_true", help="replace an existing output report"
+    )
+    ReportParser.set_defaults(handler=CommandReport)
+
+    MergeParser = Subparsers.add_parser(
+        "merge", aliases=["combine"],
+        help="combine two vaults into a separate output bowl",
+    )
+    AddVaultArgument(MergeParser)
+    MergeParser.add_argument("right", type=Path, help="second input vault")
+    MergeParser.add_argument(
+        "-o", "--output", type=Path, required=True, help="new merged vault path"
+    )
+    MergeParser.add_argument(
+        "--conflict", choices=Merge.POLICIES, default=Merge.POLICY_ERROR,
+        help="name-conflict policy (default: error)",
+    )
+    MergeParser.add_argument(
+        "--force", action="store_true", help="replace an existing output vault"
+    )
+    MergeParser.add_argument(
+        "--json", action="store_true", help="print a machine-readable merge receipt"
+    )
+    MergeParser.set_defaults(handler=CommandMerge)
+
+    SealParser = Subparsers.add_parser(
+        "seal", aliases=["stamp"],
+        help="write a secret-safe SHA-256 sidecar for this exact vault",
+    )
+    AddVaultArgument(SealParser)
+    SealParser.add_argument(
+        "-o", "--output", type=Path,
+        help="seal path (default: <vault>.seal.json)",
+    )
+    SealParser.add_argument(
+        "--force", action="store_true", help="replace an existing seal"
+    )
+    SealParser.add_argument(
+        "--json", action="store_true", help="print the seal receipt as JSON"
+    )
+    SealParser.set_defaults(handler=CommandSeal)
+
+    VerifySealParser = Subparsers.add_parser(
+        "verify-seal", aliases=["check-seal"],
+        help="check whether a vault still exactly matches its byte seal",
+    )
+    AddVaultArgument(VerifySealParser)
+    VerifySealParser.add_argument(
+        "seal_path", nargs="?", type=Path,
+        help="seal path (default: <vault>.seal.json)",
+    )
+    VerifySealParser.add_argument(
+        "--json", action="store_true", help="print machine-readable verification"
+    )
+    VerifySealParser.set_defaults(handler=CommandVerifySeal)
+
+    LedgerParser = Subparsers.add_parser(
+        "ledger", aliases=["logbook"],
+        help="verify or append secret-safe hash-chained bowl paperwork",
+    )
+    AddVaultArgument(LedgerParser)
+    LedgerParser.add_argument(
+        "--record", choices=Ledger.EVENT_ACTIONS,
+        help="append one controlled action before verifying the current bowl",
+    )
+    LedgerParser.add_argument(
+        "--ledger-path", type=Path,
+        help="ledger path (default: <vault>.ledger.jsonl)",
+    )
+    LedgerParser.add_argument(
+        "--json", action="store_true", help="print machine-readable ledger verification"
+    )
+    LedgerParser.set_defaults(handler=CommandLedger)
+
     TheaterParser = Subparsers.add_parser(
         "theater", help="calculate a completely fake security theater score"
     )
@@ -728,12 +1364,24 @@ def RunApp(CommandArgs=None):
     Parser = BuildParser()
     Args = Parser.parse_args(CommandArgs)
     try:
-        Args.handler(Args)
-    except (P00PError, KeyboardInterrupt, EOFError) as Exc:
+        Result = Args.handler(Args)
+    except (
+        P00PError,
+        Lifeboat.LifeboatError,
+        Decoy.DecoyError,
+        Reroll.RerollError,
+        Report.ReportError,
+        Merge.MergeError,
+        Seal.SealError,
+        Lab.LabError,
+        Ledger.LedgerError,
+        KeyboardInterrupt,
+        EOFError,
+    ) as Exc:
         Message = str(Exc) or "cancelled"
         print(f"p00p: {Message}", file=Sys.stderr)
         return 1
-    return 0
+    return 0 if Result is None else int(Result)
 
 
 if __name__ == "__main__":
