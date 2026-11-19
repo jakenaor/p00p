@@ -160,6 +160,12 @@ CUE_SCORES = {
     "hide": CueScore("hide", (
         Slide(720, 210, 105, Waveform="sine", Amplitude=0.4),
     ), Gain=0.54),
+    # reserved for a future nope/permission-denied action; generic failures keep "error".
+    "denied": CueScore("denied", (
+        Tone(240, 48, Waveform="square", Amplitude=0.5, ReleaseMs=7),
+        Rest(18),
+        Slide(190, 105, 105, Waveform="square", Amplitude=0.56, ReleaseMs=24),
+    ), Gain=0.68),
     "error": CueScore("error", (
         Tone(180, 80, Waveform="square", Amplitude=0.58),
         Rest(32),

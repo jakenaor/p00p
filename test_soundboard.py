@@ -93,6 +93,14 @@ class SynthesizerTests(Unittest.TestCase):
 
         self.assertEqual(Gui.SOUND_CUES, frozenset(Soundboard.CUE_SCORES))
 
+    def testDeniedCueIsReadyForFutureNopeButtons(self):
+        Score = Soundboard.CUE_SCORES["denied"]
+
+        self.assertEqual(Score.Name, "denied")
+        self.assertGreater(Score.DurationMs, 100)
+        self.assertLess(Score.DurationMs, 250)
+        self.assertIn("denied", Soundboard.CUE_NAMES)
+
 
 #MARK: nonblocking board stuffs
 class SoundBoardTests(Unittest.TestCase):

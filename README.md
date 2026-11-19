@@ -101,7 +101,7 @@ silence, pitch slides, and click-reducing attack/release envelopes:
 ~~~text
 ui_click, dialog_open, dialog_close, vault_open, vault_new,
 vault_close, doctor, backup, entry_save, entry_remove, generate, copy,
-reveal, hide, error, easter_egg
+reveal, hide, denied (reserved for future nope buttons), error, easter_egg
 ~~~
 
 one cache and one soundboard handle all playback, repeated cues restart cleanly,
