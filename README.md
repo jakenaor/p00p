@@ -77,6 +77,21 @@ have a magic apple developer certificate in the repo. if another mac gets
 dramatic about it, right-click the app and choose open. real public releases
 would need developer-id signing + apple notarization
 
+## adding ur sound effects later
+
+the qt app already throws named sound cues at `HandleSoundCue` in `qt_gui.py`.
+right now that function does absolutely nothing on purpose. put ur non-blocking
+wav player there and map these names however u want:
+
+~~~text
+ui_click, dialog_open, dialog_close, vault_open, vault_new,
+entry_save, entry_remove, generate, copy, reveal, hide, error, easter_egg
+~~~
+
+dont make every button load a file by itself or the ui will become thirteen
+tiny audio systems fighting in a trench coat. the backend signal keeps all the
+actual playback in one spot, and unknown cue typos get ignored
+
 the GUI opens the password bowl window. from there u can make/open vaults, search,
 sort by name/user/health/date, add/edit/remove entries, copy usernames, reveal
 or temporarily copy a password, run an audit, and inspect the file guts. the

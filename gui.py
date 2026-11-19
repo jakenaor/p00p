@@ -131,6 +131,28 @@ def GeneratorLength(Value):
     return Length
 
 
+class SequenceLatch:
+    # feed this one key at a time. it only pops when the whole secret spell lands.
+    def __init__(self, Pattern):
+        self.Pattern = tuple(Pattern)
+        self.Position = 0
+
+    def Feed(self, Key):
+        if not self.Pattern:
+            return False
+        Expected = self.Pattern[self.Position]
+        if Key == Expected:
+            self.Position += 1
+        elif Key == self.Pattern[0]:
+            self.Position = 1
+        else:
+            self.Position = 0
+        if self.Position == len(self.Pattern):
+            self.Position = 0
+            return True
+        return False
+
+
 def AuditVault(Vault, FilePath=None):
     Findings = []
     Fingerprints = {}

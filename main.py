@@ -18,13 +18,18 @@ import os as Os
 import secrets as Secrets
 import string as String
 import struct as Struct
+import subprocess as Subprocess
 import sys as Sys
 import tempfile as Tempfile
 import zlib as Zlib
 from datetime import datetime as DateTime, timezone as Timezone
 from pathlib import Path
 
-#add common passwords
+import poopline as Poopline
+import theater as Theater
+
+# add common passwords. if the file falls out of the package the rest of the
+# app should still open, it just loses one giant wall of bad-password knowledge.
 COMMON_PASSWORDS_PATH = Path(__file__).with_name("10k-common-passwords.txt")
 
 MAGIC = b"P00P\x00"
@@ -39,11 +44,22 @@ DEFAULT_PASSWORD_LENGTH = 24
 MIN_PASSWORD_LENGTH = 12
 MAX_PASSWORD_LENGTH = 256
 PASSWORD_SYMBOLS = "!@#$%^&*()-_=+[]{}:,.?"
-COMMON_PASSWORDS = {
-    Password.strip().casefold()
-    for Password in COMMON_PASSWORDS_PATH.read_text(encoding="utf-8").splitlines()
-    if Password.strip()
-}
+
+
+def LoadCommonPasswords(FilePath=COMMON_PASSWORDS_PATH):
+    try:
+        PasswordSoup = Path(FilePath).read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        # missing optional data should not brick the entire password bowl.
+        return frozenset()
+    return frozenset(
+        Password.strip().casefold()
+        for Password in PasswordSoup.splitlines()
+        if Password.strip()
+    )
+
+
+COMMON_PASSWORDS = LoadCommonPasswords()
 
 
 class P00PError(Exception):
@@ -121,6 +137,15 @@ def DecodeVault(Blob):
 
     ValidateVault(Vault)
     return Vault
+
+
+def PayloadRitualSummary(Vault, Salt):
+    # reenact the save and only report sizes. no password soup leaves the bowl.
+    Receipts = Poopline.InspectPayloadRitual(Vault, Salt, CAMOUFLAGE_KEY)
+    return " -> ".join(
+        f"{Receipt['stage']} {Receipt['before_size']}B>{Receipt['after_size']}B"
+        for Receipt in Receipts
+    )
 
 
 #MARK: checking the poops
@@ -393,6 +418,7 @@ def CommandInfo(Args):
     print(f"entries:    {len(Vault['entries'])}")
     print(f"created:    {Vault.get('created_at', 'unknown')}")
     print(f"updated:    {Vault.get('updated_at', 'unknown')}")
+    print(f"bad ideas: {len(COMMON_PASSWORDS)} common passwords loaded")
     try:
         Mode = Args.vault.stat().st_mode & 0o777
         print(f"permissions: {Mode:03o}")
@@ -452,6 +478,19 @@ def CommandAudit(Args):
     print("reality check: camouflage still is not encryption")
 
 
+#MARK: security theater stuffs
+def SecurityTheaterReport(FilePath):
+    Blob = ReadVaultBlob(Path(FilePath))
+    Header = ParseHeader(Blob)
+    Vault = DecodeVault(Blob)
+    Receipts = Poopline.InspectPayloadRitual(Vault, Header["salt"], CAMOUFLAGE_KEY)
+    return Theater.ScoreSecurityTheater(Vault, FilePath, Blob, Header, Receipts)
+
+
+def CommandTheater(Args):
+    print(SecurityTheaterReport(Args.vault).AsText())
+
+
 #MARK: file guts
 def CommandAnatomy(Args):
     # show the binary sandwich without dumping the decoded entry values.
@@ -467,6 +506,101 @@ def CommandAnatomy(Args):
     print(f"checksum:     {Header['digest'].hex()}")
     print(f"total bytes:  {Header['file_size']}")
     print(f"decoded:      {len(Vault['entries'])} entries, integrity check passed")
+    print(f"poopline:     {PayloadRitualSummary(Vault, Header['salt'])}")
+
+
+#MARK: graphical stuffs
+def ParseTkVersion(Value):
+    try:
+        Parts = str(Value).split(".")
+        return tuple(int(Part) for Part in Parts[:2])
+    except (TypeError, ValueError):
+        return (0, 0)
+
+
+def CurrentTkVersion():
+    try:
+        import tkinter as Tk
+        return ParseTkVersion(Tk.TkVersion)
+    except ImportError:
+        return (0, 0)
+
+
+def GuiPythonCandidates():
+    Project = Path(__file__).resolve().parent
+    Candidates = [Project / ".venv" / "bin" / "python"]
+    CustomPython = Os.environ.get("P00P_GUI_PYTHON")
+    if CustomPython:
+        Candidates.append(Path(CustomPython).expanduser())
+
+    # python.org works fine too. homebrew is an option, not a requirement.
+    for Version in ("3.15", "3.14", "3.13", "3.12", "3.11", "3.10", "3.9"):
+        Candidates.append(Path(f"/Library/Frameworks/Python.framework/Versions/{Version}/bin/python3"))
+    for Prefix in (Path("/opt/homebrew"), Path("/usr/local")):
+        Candidates.append(Prefix / "bin" / "python3")
+        for Version in ("3.15", "3.14", "3.13", "3.12", "3.11", "3.10", "3.9"):
+            Candidates.append(Prefix / "bin" / f"python{Version}")
+            Candidates.append(Prefix / "opt" / f"python@{Version}" / "libexec" / "bin" / "python3")
+
+    Seen = set()
+    for Candidate in Candidates:
+        if Candidate not in Seen:
+            Seen.add(Candidate)
+            yield Candidate
+
+
+def ProbeTkVersion(PythonPath):
+    try:
+        Result = Subprocess.run(
+            (str(PythonPath), "-c", "import tkinter as Tk; print(Tk.TkVersion)"),
+            capture_output=True,
+            text=True,
+            timeout=4,
+            check=False,
+        )
+    except (OSError, Subprocess.TimeoutExpired):
+        return (0, 0)
+    if Result.returncode != 0:
+        return (0, 0)
+    return ParseTkVersion(Result.stdout.strip())
+
+
+def FindCompatibleGuiPython():
+    CurrentPython = Path(Sys.executable).resolve()
+    for Candidate in GuiPythonCandidates():
+        try:
+            if not Candidate.is_file() or Candidate.resolve() == CurrentPython:
+                continue
+        except OSError:
+            continue
+        if ProbeTkVersion(Candidate) >= (8, 6):
+            return Candidate.resolve()
+    return None
+
+
+def GuiRuntimeError(Version):
+    VersionText = ".".join(str(Part) for Part in Version) if Version != (0, 0) else "missing"
+    return P00PError(
+        f"this python has Tk {VersionText}, but the GUI needs Tk 8.6+. "
+        "make the project .venv and install requirements.txt with a current Python.org python. "
+        "u can also set P00P_GUI_PYTHON to a compatible python path"
+    )
+
+
+def CommandGui(Args):
+    TkVersion = CurrentTkVersion()
+    if Sys.platform == "darwin" and TkVersion < (8, 6):
+        BetterPython = FindCompatibleGuiPython()
+        if BetterPython is None:
+            raise GuiRuntimeError(TkVersion)
+        MainPath = Path(__file__).resolve()
+        Os.execv(
+            str(BetterPython),
+            (str(BetterPython), str(MainPath), "gui", "--vault", str(Args.vault)),
+        )
+        return
+    from gui import RunGui
+    RunGui(StartPath=Args.vault)
 
 
 #MARK: argument stuffs
@@ -571,11 +705,21 @@ def BuildParser():
     AddVaultArgument(AuditParser)
     AuditParser.set_defaults(handler=CommandAudit)
 
+    TheaterParser = Subparsers.add_parser(
+        "theater", help="calculate a completely fake security theater score"
+    )
+    AddVaultArgument(TheaterParser)
+    TheaterParser.set_defaults(handler=CommandTheater)
+
     AnatomyParser = Subparsers.add_parser(
         "anatomy", help="explain the vault's binary envelope"
     )
     AddVaultArgument(AnatomyParser)
     AnatomyParser.set_defaults(handler=CommandAnatomy)
+
+    GuiParser = Subparsers.add_parser("gui", help="open the tkinter password bowl")
+    AddVaultArgument(GuiParser)
+    GuiParser.set_defaults(handler=CommandGui)
     return Parser
 
 

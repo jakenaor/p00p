@@ -42,6 +42,11 @@ ApplicationWindow {
             customCursorMode = 0
     }
 
+    function playSound(cue) {
+        // everything lands on one python hook, then ur future audio goblin takes over.
+        backend.requestSound(cue)
+    }
+
     //MARK: reusable terminal thingies
     component TerminalText: Text {
         color: window.textColor
@@ -81,6 +86,10 @@ ApplicationWindow {
             onHoveredChanged: window.setHoverCursor(1, hovered)
             cursorShape: window.customCursorActive
                          ? Qt.BlankCursor : Qt.PointingHandCursor
+        }
+        Connections {
+            target: control
+            function onClicked() { backend.requestSound("ui_click") }
         }
     }
 
@@ -340,14 +349,6 @@ ApplicationWindow {
                         labelColor: window.textColor
                     }
                     Item { Layout.fillHeight: true }
-                    TerminalText {
-                        text: window.shaderEnabled
-                              ? "SHADER // ACTIVE\nBACKEND // METAL\nREFRESH // VSYNC\nF8 // BYPASS"
-                              : "SHADER // BYPASSED\nF8 // ENABLE"
-                        color: window.mutedColor
-                        font.pixelSize: 9
-                        lineHeight: 1.35
-                    }
                 }
             }
 
@@ -670,12 +671,6 @@ ApplicationWindow {
                     }
                 }
 
-                TerminalText {
-                    text: backend.statusText
-                    color: window.mutedColor
-                    font.pixelSize: 9
-                    Layout.leftMargin: 3
-                }
             }
         }
 
@@ -777,10 +772,12 @@ ApplicationWindow {
         function open() {
             // normal item visibility keeps the editor inside the crt render pass.
             visible = true
+            window.playSound("dialog_open")
             forceActiveFocus()
         }
         function close() {
             visible = false
+            window.playSound("dialog_close")
             // do not leave an ibeam cursor stuck over the normal vault screen.
             window.customCursorMode = 0
         }

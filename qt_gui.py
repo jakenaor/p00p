@@ -23,6 +23,27 @@ ROOT = Path(__file__).resolve().parent
 QML_FILE = ROOT / "qml" / "Main.qml"
 SHADER_SOURCE = ROOT / "qml" / "shaders" / "crt.frag"
 SHADER_PACK = ROOT / "qml" / "shaders" / "crt.frag.qsb"
+SOUND_CUES = frozenset({
+    "ui_click",
+    "dialog_open",
+    "dialog_close",
+    "vault_open",
+    "vault_new",
+    "entry_save",
+    "entry_remove",
+    "generate",
+    "copy",
+    "reveal",
+    "hide",
+    "error",
+    "easter_egg",
+})
+
+
+def HandleSoundCue(Cue):
+    # YOUR SOUND STUFF GOES HERE!! map Cue to a wav and play it without blocking qt.
+    # all the ui actions already send their little names here so u only wire it once.
+    return None
 
 
 #MARK: shader stuffs
@@ -89,6 +110,7 @@ class VaultBackend(QObject):
     entriesChanged = Signal()
     selectionChanged = Signal()
     statusChanged = Signal()
+    soundRequested = Signal(str)
 
     def __init__(self, StartPath=None):
         super().__init__()
@@ -149,11 +171,19 @@ class VaultBackend(QObject):
         self.Status = f"SYS // {Text.upper()}"
         self.statusChanged.emit()
 
-    def _load(self, FilePath, Quiet=False):
+    @Slot(str)
+    def requestSound(self, Cue):
+        # unknown noises get ignored instead of turning one typo into a ghost sound.
+        Cue = str(Cue).strip().lower()
+        if Cue in SOUND_CUES:
+            self.soundRequested.emit(Cue)
+
+    def _load(self, FilePath, Quiet=False, SoundCue="vault_open"):
         try:
             Vault = Main.LoadVault(FilePath)
         except (Main.P00PError, OSError) as Exc:
             if not Quiet:
+                self.requestSound("error")
                 QMessageBox.critical(None, "VAULT ERROR", str(Exc))
             return False
         # only replace the live ui state after the whole file survived decoding.
@@ -164,6 +194,7 @@ class VaultBackend(QObject):
         self.PasswordVisible = False
         self.Status = f"SYS // OPENED {len(Names)} VAULT ENTR{'Y' if len(Names) == 1 else 'IES'}"
         self._emit_everything()
+        self.requestSound(SoundCue)
         return True
 
     def _save(self):
@@ -172,6 +203,7 @@ class VaultBackend(QObject):
         try:
             Main.SaveVault(self.FilePath, self.Vault)
         except (Main.P00PError, OSError) as Exc:
+            self.requestSound("error")
             QMessageBox.critical(None, "SAVE ERROR", str(Exc))
             return False
         return True
@@ -247,9 +279,10 @@ class VaultBackend(QObject):
         try:
             Main.SaveVault(FilePath, Vault)
         except (Main.P00PError, OSError) as Exc:
+            self.requestSound("error")
             QMessageBox.critical(None, "NEW VAULT ERROR", str(Exc))
             return
-        self._load(FilePath)
+        self._load(FilePath, SoundCue="vault_new")
 
     @Slot()
     def openVault(self):
@@ -301,8 +334,11 @@ class VaultBackend(QObject):
     @Slot(int, bool, result=str)
     def generatePassword(self, Length, Symbols):
         try:
-            return Main.GeneratePassword(int(Length), Symbols=bool(Symbols))
+            Password = Main.GeneratePassword(int(Length), Symbols=bool(Symbols))
+            self.requestSound("generate")
+            return Password
         except Main.P00PError as Exc:
+            self.requestSound("error")
             QMessageBox.warning(None, "GENERATOR ERROR", str(Exc))
             return ""
 
@@ -340,6 +376,7 @@ class VaultBackend(QObject):
         self.SelectedName = CleanName
         self.PasswordVisible = False
         self._set_status(f"ADDED {CleanName}")
+        self.requestSound("entry_save")
         self.entriesChanged.emit()
         self.selectionChanged.emit()
         return True
@@ -380,6 +417,7 @@ class VaultBackend(QObject):
         self.SelectedName = CleanName
         self.PasswordVisible = False
         self._set_status(f"UPDATED {CleanName}")
+        self.requestSound("entry_save")
         self.entriesChanged.emit()
         self.selectionChanged.emit()
         return True
@@ -408,6 +446,7 @@ class VaultBackend(QObject):
         self.SelectedName = Names[0] if Names else ""
         self.PasswordVisible = False
         self._set_status(f"REMOVED {RemovedName}")
+        self.requestSound("entry_remove")
         self.entriesChanged.emit()
         self.selectionChanged.emit()
 
@@ -429,6 +468,7 @@ class VaultBackend(QObject):
         QGuiApplication.clipboard().setText(Text)
         self._clear_clipboard_later(Text)
         self._set_status("USERNAME COPIED FOR 20 SECONDS")
+        self.requestSound("copy")
 
     @Slot()
     def copyPassword(self):
@@ -438,12 +478,14 @@ class VaultBackend(QObject):
         QGuiApplication.clipboard().setText(Text)
         self._clear_clipboard_later(Text)
         self._set_status("PASSWORD COPIED FOR 20 SECONDS")
+        self.requestSound("copy")
 
     @Slot()
     def togglePassword(self):
         if not self._entry():
             return
         self.PasswordVisible = not self.PasswordVisible
+        self.requestSound("reveal" if self.PasswordVisible else "hide")
         self.selectionChanged.emit()
         if self.PasswordVisible:
             # revealed means revealed for 20 seconds, not until the app gets forgotten.
@@ -523,6 +565,8 @@ def RunQtGui(StartPath=None):
     App.setApplicationName("p00p weird storage")
     Engine = QQmlApplicationEngine()
     Backend = VaultBackend(StartPath=StartPath)
+    # one hookup for every sound. replace HandleSoundCue when ur audio goblin is ready.
+    Backend.soundRequested.connect(HandleSoundCue)
     # qml gets one boring backend object instead of importing python spaghetti.
     Engine.rootContext().setContextProperty("backend", Backend)
     Engine.load(QUrl.fromLocalFile(str(QML_FILE)))

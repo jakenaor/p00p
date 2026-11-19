@@ -60,6 +60,29 @@ class FormatTests(Unittest.TestCase):
 
 #MARK: password stuffs
 class PasswordTests(Unittest.TestCase):
+    def testTheWholeCommonPasswordWallLoaded(self):
+        self.assertEqual(len(Main.COMMON_PASSWORDS), 10_000)
+        self.assertIn("password", Main.COMMON_PASSWORDS)
+
+    def testCommonPasswordLoaderCleansUpTheList(self):
+        with Tempfile.TemporaryDirectory() as Directory:
+            FilePath = Path(Directory) / "bad-ideas.txt"
+            FilePath.write_text(" Password \nPASSWORD\n\nQwErTy\n", encoding="utf-8")
+
+            Loaded = Main.LoadCommonPasswords(FilePath)
+
+        self.assertEqual(Loaded, frozenset({"password", "qwerty"}))
+
+    def testMissingCommonPasswordWallDoesNotBrickTheApp(self):
+        Missing = Path("definitely-not-a-real-common-password-file.txt")
+
+        self.assertEqual(Main.LoadCommonPasswords(Missing), frozenset())
+
+    def testCommonPasswordCheckIgnoresCase(self):
+        Issues = Main.PasswordIssues("PASSWORD")
+
+        self.assertTrue(any("common-password" in Issue for Issue in Issues))
+
     def testGeneratedPasswordHasAllTheStuffs(self):
         Password = Main.GeneratePassword(40)
 
