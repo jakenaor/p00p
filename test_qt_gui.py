@@ -1,4 +1,5 @@
 import unittest as Unittest
+from pathlib import Path
 
 import qt_gui as Gui
 
@@ -26,6 +27,19 @@ class SoundHookTests(Unittest.TestCase):
     def testEveryCueHasOneObviousNoOpLandingSpot(self):
         for Cue in Gui.SOUND_CUES:
             self.assertIsNone(Gui.HandleSoundCue(Cue))
+
+
+#MARK: qt command stuffs
+class QtCommandTests(Unittest.TestCase):
+    def testVaultArgumentPointsAtTheRequestedBowl(self):
+        Args = Gui.BuildQtParser().parse_args(("--vault", ".space.poop"))
+
+        self.assertEqual(Args.vault, Path(".space.poop"))
+
+    def testVaultArgumentCanBeLeftOut(self):
+        Args = Gui.BuildQtParser().parse_args(())
+
+        self.assertIsNone(Args.vault)
 
 
 if __name__ == "__main__":

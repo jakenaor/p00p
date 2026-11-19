@@ -19,7 +19,7 @@ terminal app + custom binary format wrapped in the worlds worst security advice
 - show u the weird file guts with the `anatomy` command
 - pass every payload through a wildly unnecessary three-goblin poopline
 - calculate a completely fake 100-point security theater score
-- use all of that from a tkinter GUI if terminal commands arent your thing
+- use the vault from a blocky qt terminal with an actual crt shader
 
 ## important thing before u use it
 
@@ -38,28 +38,26 @@ password manager with real authenticated encryption for passwords u care about
 u need **Python 3.9 or newer** for the terminal app. the terminal commands only
 use pythons standard library
 
-the good-looking GUI uses **CustomTkinter** and needs **Tk 8.6 or newer**.
-apples `/usr/bin/python3` still comes with ancient Tk 8.5, which draws a
-beautiful empty rectangle on newer macOS lol. u do not need Homebrew. with a
-normal Python.org 3.12 install, do this once inside the project folder:
+the current good-looking GUI uses **PySide6 + QML**. it does not care what
+ancient tkinter apple left under the floorboards. u do not need Homebrew. with
+a normal Python.org 3.12 install, do this once inside the project folder:
 
 ~~~sh
 python3.12 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
 ~~~
 
-then run the normal GUI command below. p00p finds the project `.venv` and hands
-itself over automatically, so u dont have to activate anything. it can also
-find newer Homebrew and official Python.org installs. if your good python lives
-somewhere weird, set `P00P_GUI_PYTHON=/path/to/python3` before the command
-
 these commands are for a macOS/Linux terminal:
 
-the easy graphical version:
+the current shader graphical version:
 
 ~~~sh
-python3 main.py gui
+.venv/bin/python qt_gui.py
 ~~~
+
+`python3 main.py gui` still opens the older tkinter bowl if u are feeling
+archaeological. `ctk_gui.py` is also still around as a fossil, but the packaged
+app and all the new visual work use `qt_gui.py`
 
 ## making the mac app thingy
 
@@ -94,22 +92,28 @@ actual playback in one spot, and unknown cue typos get ignored
 
 the GUI opens the password bowl window. from there u can make/open vaults, search,
 sort by name/user/health/date, add/edit/remove entries, copy usernames, reveal
-or temporarily copy a password, run an audit, and inspect the file guts. the
+or temporarily copy a password. the
 list shows basic password-health counts without showing the password itself.
 revealed passwords hide again after 20 seconds, and copied stuff clears from
 the clipboard after 20 seconds if something else hasnt replaced it already.
-the add/edit window has a configurable generator, live basic health feedback,
-and a warning before u save something hilariously weak. the `vibes` button
-opens the same fake applause meter as the terminal command
+the add/edit window has a configurable generator and live basic health feedback
 
-the interface uses a restrained dark chocolate palette, flat panels, clean
-password-manager controls, and exactly one visible poop mascot. there are also
-two completely useless easter eggs hiding in the window. im not spoiling them
+the interface uses blocky terminal panels, a moving crt shader, a tic-80-ish
+mouse, and exactly one visible poop mascot. press `F8` if the shader needs to
+get out of the way while u debug it
+
+keyboard things for people who hate clicking:
+
+- `cmd/ctrl + f` jumps into vault search
+- `cmd/ctrl + shift + n` opens a new entry
+- `cmd/ctrl + e` edits the selected entry
+- `cmd/ctrl + s` saves the open entry editor
+- `escape` closes the editor or releases the fake mouse
 
 if u want to open a specific bowl:
 
 ~~~sh
-python3 main.py gui --vault .secrets.poop
+.venv/bin/python qt_gui.py --vault .secrets.poop
 ~~~
 
 the terminal version still works too:
@@ -197,7 +201,7 @@ something
 | `audit` | finds basic password/file hygiene problems |
 | `theater` | awards a fake security-theater score out of 100 |
 | `anatomy` | shows the binary file bits + checks the file |
-| `gui` | opens the tkinter password bowl |
+| `gui` | opens the legacy tkinter password bowl |
 
 ## how the weird storage works
 
@@ -231,7 +235,7 @@ file format details
 ## testing it
 
 ~~~sh
-.venv/bin/python -m unittest -v
+.venv/bin/python -m unittest discover -v
 ~~~
 
 the terminal/storage guts use pythons standard library and the GUI dependency

@@ -3,6 +3,7 @@
 # the shader is real. the security claims are still extremely not #
 #------------------------------------------------------------------#
 
+import argparse as Argparse
 import copy as Copy
 import hashlib as Hashlib
 import os as Os
@@ -561,7 +562,8 @@ def RunQtGui(StartPath=None):
     if Sys.platform == "darwin":
         Os.environ.setdefault("QSG_RHI_BACKEND", "metal")
     QQuickStyle.setStyle("Basic")
-    App = QApplication.instance() or QApplication(Sys.argv)
+    # qt does not need to chew on p00p's --vault argument after argparse ate it.
+    App = QApplication.instance() or QApplication([Sys.argv[0]])
     App.setApplicationName("p00p weird storage")
     Engine = QQmlApplicationEngine()
     Backend = VaultBackend(StartPath=StartPath)
@@ -578,5 +580,24 @@ def RunQtGui(StartPath=None):
     return App.exec()
 
 
+def BuildQtParser():
+    Parser = Argparse.ArgumentParser(
+        prog="qt_gui.py",
+        description="open the blocky shader version of the p00p password bowl",
+    )
+    Parser.add_argument(
+        "--vault",
+        type=Path,
+        help="open this .p00p or .poop file on startup",
+    )
+    Parser.add_argument("--version", action="version", version=f"p00p {Main.PROJECT_VERSION}")
+    return Parser
+
+
+def RunQtApp(CommandArgs=None):
+    Args = BuildQtParser().parse_args(CommandArgs)
+    return RunQtGui(StartPath=Args.vault)
+
+
 if __name__ == "__main__":
-    raise SystemExit(RunQtGui())
+    raise SystemExit(RunQtApp())

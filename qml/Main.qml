@@ -47,6 +47,23 @@ ApplicationWindow {
         backend.requestSound(cue)
     }
 
+    // tiny doors keep the modal from reaching sideways for a context property.
+    // qmllint likes the qualification and the editor gets less spaghetti-shaped.
+    function selectedEntry() {
+        return backend.selectedEntry()
+    }
+    function generatePassword(length, symbols) {
+        return backend.generatePassword(length, symbols)
+    }
+    function passwordHealth(password) {
+        return backend.passwordHealth(password)
+    }
+    function saveEntry(editing, originalName, name, username, password, notes) {
+        return editing
+            ? backend.editEntry(originalName, name, username, password, notes)
+            : backend.addEntry(name, username, password, notes)
+    }
+
     //MARK: reusable terminal thingies
     component TerminalText: Text {
         color: window.textColor
@@ -251,6 +268,26 @@ ApplicationWindow {
     Shortcut { sequences: [StandardKey.Open]; onActivated: backend.openVault() }
     Shortcut { sequence: "Ctrl+Shift+N"; onActivated: editor.openNew() }
     Shortcut { sequence: "Meta+Shift+N"; onActivated: editor.openNew() }
+    Shortcut {
+        sequences: [StandardKey.Find]
+        enabled: !editor.visible
+        onActivated: searchField.forceActiveFocus()
+    }
+    Shortcut {
+        sequence: "Ctrl+E"
+        enabled: !editor.visible && backend.selectedName !== "—"
+        onActivated: editor.openEdit()
+    }
+    Shortcut {
+        sequence: "Meta+E"
+        enabled: !editor.visible && backend.selectedName !== "—"
+        onActivated: editor.openEdit()
+    }
+    Shortcut {
+        sequences: [StandardKey.Save]
+        enabled: editor.visible
+        onActivated: editor.save()
+    }
     // emergency un-crt button for debugging the ui underneath.
     Shortcut { sequence: "F8"; onActivated: window.shaderEnabled = !window.shaderEnabled }
     Shortcut {
@@ -793,7 +830,7 @@ ApplicationWindow {
             Qt.callLater(function() { nameField.forceActiveFocus() })
         }
         function openEdit() {
-            var entry = backend.selectedEntry()
+            var entry = window.selectedEntry()
             if (!entry.name)
                 return
             editMode = true
@@ -804,6 +841,14 @@ ApplicationWindow {
             notesField.text = entry.notes
             open()
             Qt.callLater(function() { nameField.forceActiveFocus() })
+        }
+
+        function save() {
+            var saved = window.saveEntry(
+                editMode, originalName, nameField.text, usernameField.text,
+                passwordField.text, notesField.text)
+            if (saved)
+                close()
         }
 
         Keys.onEscapePressed: function(event) {
@@ -877,7 +922,7 @@ ApplicationWindow {
                             labelColor: window.buttonTextColor
                             outlineColor: window.accentColor
                             onClicked: {
-                                var generated = backend.generatePassword(lengthBox.value, symbolBox.checked)
+                                var generated = window.generatePassword(lengthBox.value, symbolBox.checked)
                                 if (generated)
                                     passwordField.text = generated
                             }
@@ -908,7 +953,7 @@ ApplicationWindow {
                         TerminalText {
                             anchors.fill: parent
                             anchors.margins: 9
-                            text: backend.passwordHealth(passwordField.text).text
+                            text: window.passwordHealth(passwordField.text).text
                             color: window.accentColor
                             font.pixelSize: 9
                             wrapMode: Text.Wrap
@@ -932,16 +977,7 @@ ApplicationWindow {
                             hoverFillColor: window.accentHoverColor
                             labelColor: window.buttonTextColor
                             outlineColor: window.accentColor
-                            onClicked: {
-                                var saved = editor.editMode
-                                    ? backend.editEntry(editor.originalName, nameField.text,
-                                                        usernameField.text, passwordField.text,
-                                                        notesField.text)
-                                    : backend.addEntry(nameField.text, usernameField.text,
-                                                       passwordField.text, notesField.text)
-                                if (saved)
-                                    editor.close()
-                            }
+                            onClicked: editor.save()
                         }
                     }
                 }
