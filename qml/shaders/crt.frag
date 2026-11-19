@@ -39,10 +39,16 @@ void main() {
     float blue = texture(source, clamp(uv - chroma, 0.0, 1.0)).b;
     vec3 color = vec3(red, green, blue);
 
+    // Broad phosphor columns drift slightly so the tube feels imperfect.
+    float columnPosition = uv.x * ubuf.resolution.x;
+    float unevenSpacing = sin(columnPosition * 0.061) * 1.80
+                        + sin(columnPosition * 0.017 + 1.4) * 3.20;
+    float verticalWobble = sin(uv.y * 10.0 + ubuf.time * 0.25) * 1.30;
     float scanWave = 0.5 + 0.5 * sin(
-        (uv.y * ubuf.resolution.y + ubuf.time * 59.94) * 3.14159265
+        (columnPosition + unevenSpacing + verticalWobble + ubuf.time * 8.0)
+        * 0.39269908
     );
-    color *= 1.0 - ubuf.scanlineStrength * scanWave;
+    color *= 1.0 + ubuf.scanlineStrength * scanWave;
 
     float rollPosition = fract(uv.y - ubuf.time * 0.11);
     float rollBand = exp(-pow((rollPosition - 0.5) * 11.0, 2.0));

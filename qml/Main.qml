@@ -194,7 +194,7 @@ ApplicationWindow {
             property real time: 0.0
             property size resolution: Qt.size(uiRoot.width, uiRoot.height)
             property real curvature: 0.020
-            property real scanlineStrength: 0.095
+            property real scanlineStrength: 0.24
             property real noiseStrength: 0.009
             property real chromaStrength: 1.0
             fragmentShader: "shaders/crt.frag.qsb"
