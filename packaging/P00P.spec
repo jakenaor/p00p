@@ -11,7 +11,11 @@ a = Analysis(
     [str(PROJECT / "qt_gui.py")],
     pathex=[str(PROJECT)],
     binaries=[],
-    datas=[(str(PROJECT / "qml"), "qml")],
+    datas=[
+        (str(PROJECT / "qml"), "qml"),
+        # the password checker needs its giant wall of bad ideas in the app too.
+        (str(PROJECT / "10k-common-passwords.txt"), "."),
+    ],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

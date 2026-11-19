@@ -1,5 +1,6 @@
+
 #------------------------------------------------------------------#
-# persistent 0-leak 0bject protocol                               #
+# persistent 0-leak 0bject protocol                                #
 # the password manager that is actually safe probably              #
 # app by jakenaor                                                  #
 #                                                                  #
@@ -23,6 +24,8 @@ import zlib as Zlib
 from datetime import datetime as DateTime, timezone as Timezone
 from pathlib import Path
 
+#add common passwords
+COMMON_PASSWORDS_PATH = Path(__file__).with_name("10k-common-passwords.txt")
 
 MAGIC = b"P00P\x00"
 VERSION = 1
@@ -37,12 +40,9 @@ MIN_PASSWORD_LENGTH = 12
 MAX_PASSWORD_LENGTH = 256
 PASSWORD_SYMBOLS = "!@#$%^&*()-_=+[]{}:,.?"
 COMMON_PASSWORDS = {
-    "12345678",
-    "letmein",
-    "password",
-    "password1",
-    "qwerty",
-    "qwerty123",
+    Password.strip().casefold()
+    for Password in COMMON_PASSWORDS_PATH.read_text(encoding="utf-8").splitlines()
+    if Password.strip()
 }
 
 

@@ -681,14 +681,14 @@ ApplicationWindow {
 
         Item {
             id: customCursor
-            // final window layer or the name field eats the mouse. yes it really tried.
-            parent: window.contentItem
+            // qt popups live in overlay land, so the mouse has to live there too.
+            parent: Overlay.overlay
             z: 1000000
             visible: window.customCursorActive && window.cursorInside
             readonly property int hotspotX: window.customCursorMode === 1 ? 12
                                               : window.customCursorMode === 2 ? 8 : 0
             readonly property int hotspotY: window.customCursorMode === 2 ? 12 : 0
-            // python reports window coordinates, so this item also lives on the window.
+            // overlay uses the same window coordinates that python reports.
             x: Math.round(window.cursorX) - hotspotX
             y: Math.round(window.cursorY) - hotspotY
             width: 32
