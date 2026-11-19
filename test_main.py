@@ -205,6 +205,13 @@ class CommandTests(Unittest.TestCase):
             Result, AnatomyOutput, _ = self.RunCli("anatomy", *VaultArgument)
             self.assertEqual(Result, 0)
             self.assertIn("integrity check passed", AnatomyOutput)
+            self.assertEqual(self.RunCli("scatter", *VaultArgument)[0], 0)
+            self.assertNotIn(Password, self.RunCli("scatter", "--json", "--output-prefix", str(Path(Directory) / "second-set"), *VaultArgument)[1])
+            self.assertNotIn(Password, self.RunCli("gather", str(Path(Directory) / "second-set.1-of-3.p00pshard"), str(Path(Directory) / "second-set.2-of-3.p00pshard"), "--output", str(Path(Directory) / ".json-recovered.p00p"), "--json")[1])
+            self.assertEqual(self.RunCli("gather", str(Main.Scatter.SuggestedFragmentPaths(FilePath)[0]), str(Main.Scatter.SuggestedFragmentPaths(FilePath)[2]), "--output", str(Path(Directory) / ".workflow-recovered.p00p"))[0], 0)
+            self.assertEqual(FilePath.read_bytes(), (Path(Directory) / ".workflow-recovered.p00p").read_bytes())
+            self.assertEqual(self.RunCli("gather", str(Main.Scatter.SuggestedFragmentPaths(FilePath)[0]), str(Main.Scatter.SuggestedFragmentPaths(FilePath)[1]), "--output", str(Main.Scatter.SuggestedFragmentPaths(FilePath)[0]), "--force")[0], 1)
+            self.assertEqual(self.RunCli("gather", str(Main.Scatter.SuggestedFragmentPaths(FilePath)[0]), str(Main.Scatter.SuggestedFragmentPaths(FilePath)[1]), "--output", str(Main.Scatter.SuggestedFragmentPaths(FilePath)[1]), "--force")[0], 1)
 
     def testNoSymbolsRequiresGeneration(self):
         with Tempfile.TemporaryDirectory() as Directory:

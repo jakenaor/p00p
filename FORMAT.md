@@ -116,6 +116,13 @@ key, so an attacker who can rewrite both the bowl and ledger can rebuild a valid
 chain. the validator is for accidental changes, busted demos, and learning how
 append-style storage works without pretending SHA-256 alone creates trust
 
+## the optional 2-of-3 scatter fragments
+
+each `.p00pshard` is a fixed 100-byte header followed by one vault-sized payload.
+in order: 8-byte magic, version, index, threshold, count, 16-byte set id, 8-byte big-endian original size, original SHA-256, then payload SHA-256.
+for each byte it picks random slope `a` and stores `vault_byte + a*x` over GF(256) at x=1,2,3, so two distinct points recover x=0.
+one fragment lacks the raw bowl, but any two reveal everything and this custom digest-bearing scheme is experimental, not audited encryption.
+
 ## security stuff so nobody gets the wrong idea
 
 anyone with this source code can reverse the encoding. SHAKE-256 sounds fancy,

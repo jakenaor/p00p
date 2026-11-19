@@ -27,6 +27,7 @@ terminal app + custom binary format wrapped in the worlds worst security advice
 - pour two bowls into a separate third bowl with loud, explicit conflict rules
 - stamp and verify owner-only SHA-256 sidecars for exact byte-identity checks
 - append secret-safe checkpoints to a hash-chained JSONL bowl ledger
+- scatter one bowl into three threshold fragments and recover it from any two
 - drop a cosmetic idle privacy curtain that clears only clipboard text p00p owns
 - show u the weird file guts with the `anatomy` command
 - pass every payload through a wildly unnecessary three-goblin poopline
@@ -306,6 +307,13 @@ python3 main.py ledger --record checkpoint --vault .showcase.p00p
 # verify the current bowl against the last checkpoint (logbook is the silly alias)
 python3 main.py logbook --json --vault .showcase.p00p
 
+# make three owner-only fragments; keep any two if u want the bowl back
+python3 main.py scatter --vault .showcase.p00p
+
+# recover from any two; output is explicit and existing files are refused by default
+python3 main.py gather .showcase.p00p.fragment.1-of-3.p00pshard \
+  .showcase.p00p.fragment.3-of-3.p00pshard --output .recovered.p00p
+
 # look at the binary envelope + make sure it still decodes
 python3 main.py anatomy
 
@@ -343,6 +351,8 @@ something
 | `seal` / `stamp` | writes a secret-safe SHA-256 byte-identity sidecar with `600` permissions |
 | `verify-seal` / `check-seal` | checks filename, size, digest, and decoded entry count against a seal |
 | `ledger` / `logbook` | appends fixed-action checkpoints or verifies the current bowl against the last one |
+| `scatter` / `shard` | writes three owner-only GF(256) fragments where any two reconstruct the bowl |
+| `gather` / `unshard` | validates two matching fragments and atomically writes their exact recovered bowl |
 | `theater` | awards a fake security-theater score out of 100 |
 | `anatomy` | shows the binary file bits + checks the file |
 | `gui` | opens the legacy tkinter password bowl |

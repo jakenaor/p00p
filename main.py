@@ -39,6 +39,9 @@ import merge as Merge
 import seal as Seal
 import lab as Lab
 import ledger as Ledger
+# Scatter is a module namespace; its split/rebuild boundary accepts immutable bytes.
+# Its file helpers return validated fragment/receipt objects or raise ScatterError.
+import scatter as Scatter
 
 # add common passwords. if the file falls out of the package the rest of the
 # app should still open, it just loses one giant wall of bad-password knowledge.
@@ -916,6 +919,28 @@ def CommandLedger(Args):
     print(Result.AsJson() if Args.json else Result.AsText())
     return 0 if Result.Passed else 2
 
+# CommandScatter receives a Namespace with path-like vault/output_prefix and bool json.
+# It validates one bowl, publishes exactly three new fragments, and returns None.
+# Blob is immutable bytes containing the exact on-disk p00p envelope, not decoded JSON.
+# It is size-bounded by ReadVaultBlob and must pass DecodeVault before publication.
+# Receipt is a ScatterReceipt created only after all three fragments publish successfully.
+# It renders paths/counts/digests only and never receives decoded credential fields.
+def CommandScatter(Args): Blob = ReadVaultBlob(Args.vault); DecodeVault(Blob); Receipt = Scatter.ScatterToFiles(Args.vault, Blob, Prefix=Args.output_prefix); print(Receipt.AsJson() if Args.json else Receipt.AsText())
+
+# CommandGather receives Path left/right/output plus bool force/json Namespace fields.
+# It validates/rebuilds/decodes before atomic output, prints a receipt, and returns None.
+# Blob is immutable reconstructed bytes whose fragment metadata and SHA-256 already match.
+# It must additionally pass DecodeVault before any output file can be installed.
+# SetId is exactly 16 immutable matched-header bytes and is an identifier, never a key.
+# It is receipt correlation metadata only and grants no overwrite or trust authority.
+# Receipt is a GatherReceipt constructed only after AtomicDock installs the valid bowl.
+# It renders paths/size/digest/set id only and never receives decoded credentials.
+def CommandGather(Args): Blob, SetId = Scatter.GatherFromFiles(Args.left, Args.right); Lifeboat.Launch(Source=Args.left if Lifeboat.PathsPointToSamePlace(Args.output, Args.left) else Args.right, Destination=Args.output, Blob=Blob, EntryCount=len(DecodeVault(Blob)["entries"]), Force=Args.force, Action="restore"); Receipt = Scatter.GatherReceipt((Args.left, Args.right), Args.output, Blob, SetId); print(Receipt.AsJson() if Args.json else Receipt.AsText())
+
+# CommandRepair receives Path left/right/output, integer index, and bool force fields.
+# It atomically installs one validated fragment and never replaces either source path.
+def CommandRepair(Args): Lifeboat.Launch(Source=Args.left if Lifeboat.PathsPointToSamePlace(Args.output, Args.left) else Args.right, Destination=Args.output, Blob=Scatter.RepairFragment(Scatter.ReadFragment(Args.left), Scatter.ReadFragment(Args.right), Args.index).Encode(), EntryCount=0, Force=Args.force, Action="repair-fragment"); print(Args.output)
+
 
 #MARK: security theater stuffs
 def SecurityTheaterReport(FilePath):
@@ -1341,6 +1366,33 @@ def BuildParser():
     )
     LedgerParser.set_defaults(handler=CommandLedger)
 
+    # ScatterParser is an argparse parser owned only by the scatter/shard command branch.
+    # It yields Path vault/output_prefix, bool json, and callable CommandScatter fields.
+    ScatterParser = Subparsers.add_parser("scatter", aliases=["shard"], help="split one bowl into three fragments; any two can recover it")
+    AddVaultArgument(ScatterParser)
+    ScatterParser.add_argument("-o", "--output-prefix", type=Path, help="fragment name prefix (default: <vault>.fragment)")
+    ScatterParser.add_argument("--json", action="store_true", help="print a machine-readable scatter receipt")
+    ScatterParser.set_defaults(handler=CommandScatter)
+
+    # GatherParser is an argparse parser owned only by the gather/unshard branch.
+    # It yields Path left/right/output, bool force/json, and callable handler fields.
+    GatherParser = Subparsers.add_parser("gather", aliases=["unshard"], help="rebuild a bowl from any two matching fragments")
+    GatherParser.add_argument("left", type=Path, help="first fragment path (any index)")
+    GatherParser.add_argument("right", type=Path, help="second fragment path (different index)")
+    GatherParser.add_argument("-o", "--output", type=Path, required=True, help="new recovered vault path")
+    GatherParser.add_argument("--force", action="store_true", help="replace an existing output vault")
+    GatherParser.add_argument("--json", action="store_true", help="print a machine-readable gather receipt")
+    GatherParser.set_defaults(handler=CommandGather)
+
+    # RepairParser is an argparse parser owned only by the repair-fragment branch.
+    # It yields Path left/right/output, int index, bool force, and CommandRepair fields.
+    RepairParser = Subparsers.add_parser("repair-fragment", aliases=["repair-shard"], help="recreate one missing fragment from the other two")
+    RepairParser.add_argument("left", type=Path, help="first surviving fragment path (any index)")
+    RepairParser.add_argument("right", type=Path, help="second surviving fragment path (different index)")
+    RepairParser.add_argument("--index", type=int, choices=(1, 2, 3), required=True, help="missing fragment index to recreate")
+    RepairParser.add_argument("-o", "--output", type=Path, required=True, help="new repaired fragment path")
+    RepairParser.add_argument("--force", action="store_true", help="replace an existing non-source output fragment")
+
     TheaterParser = Subparsers.add_parser(
         "theater", help="calculate a completely fake security theater score"
     )
@@ -1375,6 +1427,7 @@ def RunApp(CommandArgs=None):
         Seal.SealError,
         Lab.LabError,
         Ledger.LedgerError,
+        Scatter.ScatterError,
         KeyboardInterrupt,
         EOFError,
     ) as Exc:

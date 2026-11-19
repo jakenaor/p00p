@@ -60,7 +60,7 @@ class AtomicDockTests(Unittest.TestCase):
 
             self.assertEqual(Destination.read_bytes(), Blob)
             self.assertEqual(Destination.stat().st_mode & 0o777, 0o600)
-            self.assertEqual(Main.LoadVault(Destination)["entries"], CargoVault()["entries"])
+            self.assertEqual(Main.LoadVault(Destination)["entries"], Main.LoadVault(Source)["entries"])
             self.assertEqual(Receipt.ByteCount, len(Blob))
             self.assertEqual(len(Receipt.Digest), 64)
 
