@@ -1392,6 +1392,7 @@ def BuildParser():
     RepairParser.add_argument("--index", type=int, choices=(1, 2, 3), required=True, help="missing fragment index to recreate")
     RepairParser.add_argument("-o", "--output", type=Path, required=True, help="new repaired fragment path")
     RepairParser.add_argument("--force", action="store_true", help="replace an existing non-source output fragment")
+    RepairParser.set_defaults(handler=CommandRepair)
 
     TheaterParser = Subparsers.add_parser(
         "theater", help="calculate a completely fake security theater score"

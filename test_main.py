@@ -212,6 +212,7 @@ class CommandTests(Unittest.TestCase):
             self.assertEqual(FilePath.read_bytes(), (Path(Directory) / ".workflow-recovered.p00p").read_bytes())
             self.assertEqual(self.RunCli("gather", str(Main.Scatter.SuggestedFragmentPaths(FilePath)[0]), str(Main.Scatter.SuggestedFragmentPaths(FilePath)[1]), "--output", str(Main.Scatter.SuggestedFragmentPaths(FilePath)[0]), "--force")[0], 1)
             self.assertEqual(self.RunCli("gather", str(Main.Scatter.SuggestedFragmentPaths(FilePath)[0]), str(Main.Scatter.SuggestedFragmentPaths(FilePath)[1]), "--output", str(Main.Scatter.SuggestedFragmentPaths(FilePath)[1]), "--force")[0], 1)
+            self.assertEqual(self.RunCli("repair-fragment", str(Main.Scatter.SuggestedFragmentPaths(FilePath)[0]), str(Main.Scatter.SuggestedFragmentPaths(FilePath)[2]), "--index", "2", "--output", str(Path(Directory) / "repaired-2.p00pshard"))[0], 0); self.assertEqual((Path(Directory) / "repaired-2.p00pshard").read_bytes(), Main.Scatter.SuggestedFragmentPaths(FilePath)[1].read_bytes())
 
     def testNoSymbolsRequiresGeneration(self):
         with Tempfile.TemporaryDirectory() as Directory:
