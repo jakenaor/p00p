@@ -440,12 +440,19 @@ class CursorEventFilter(QObject):
     def __init__(self, Window):
         super().__init__(Window)
         self.Window = Window
+        self.OverrideActive = False
 
     def setActive(self, Active):
         if Active and bool(self.Window.property("cursorInside")):
+            if not self.OverrideActive:
+                QGuiApplication.setOverrideCursor(QCursor(Qt.CursorShape.BlankCursor))
+                self.OverrideActive = True
             self.Window.setCursor(QCursor(Qt.CursorShape.BlankCursor))
         else:
             self.Window.unsetCursor()
+            if self.OverrideActive:
+                QGuiApplication.restoreOverrideCursor()
+                self.OverrideActive = False
 
     def _move_pointer(self, Event):
         Position = Event.position()
@@ -470,7 +477,11 @@ class CursorEventFilter(QObject):
         elif EventType == QEvent.Type.Leave:
             self.Window.setProperty("cursorInside", False)
             self.Window.setProperty("cursorPressed", False)
-            self.Window.unsetCursor()
+            self.setActive(False)
+        elif EventType == QEvent.Type.WindowDeactivate:
+            self.setActive(False)
+        elif EventType == QEvent.Type.WindowActivate:
+            self.setActive(bool(self.Window.property("customCursorActive")))
         return super().eventFilter(Watched, Event)
 
 
