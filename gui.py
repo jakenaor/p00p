@@ -11,22 +11,21 @@ from pathlib import Path
 from tkinter import filedialog as FileDialog
 from tkinter import messagebox as MessageBox
 from tkinter import ttk as Ttk
-#
+
 import main as Main
 
 
 #MARK: colors and stuffs
-WINDOW_BG = "#0e0c0b"
-PANEL_BG = "#171310"
-PANEL_LIGHT = "#211b17"
-PANEL_BORDER = "#342a24"
-TEXT = "#f6eee8"
-MUTED = "#a8998f"
-BROWN = "#d07b42"
-BROWN_HOVER = "#e38b50"
-CREAM = "#fff5ed"
-RED = "#ff7777"
-GREEN = "#6bd18d"
+WINDOW_BG = "#eaded4"
+PANEL_BG = "#fffaf5"
+PANEL_LIGHT = "#ead9ca"
+TEXT = "#2a1b14"
+MUTED = "#705e54"
+BROWN = "#8a5638"
+BROWN_HOVER = "#a86c48"
+CREAM = "#59321f"
+RED = "#d96b5f"
+GREEN = "#76bd82"
 FONT = "Avenir Next"
 MONO_FONT = "SF Mono"
 
@@ -132,27 +131,6 @@ def GeneratorLength(Value):
     return Length
 
 
-class SequenceLatch:
-    def __init__(self, Pattern):
-        self.Pattern = tuple(Pattern)
-        self.Position = 0
-
-    def Feed(self, Key):
-        if not self.Pattern:
-            return False
-        Expected = self.Pattern[self.Position]
-        if Key == Expected:
-            self.Position += 1
-        elif Key == self.Pattern[0]:
-            self.Position = 1
-        else:
-            self.Position = 0
-        if self.Position == len(self.Pattern):
-            self.Position = 0
-            return True
-        return False
-
-
 def AuditVault(Vault, FilePath=None):
     Findings = []
     Fingerprints = {}
@@ -210,9 +188,9 @@ def FormatAnatomy(FilePath):
 class P00PWindow(Tk.Tk):
     def __init__(self, StartPath=None):
         super().__init__()
-        self.title("p00p weird storage")
-        self.geometry("1080x680")
-        self.minsize(900, 600)
+        self.title("p00p password bowl")
+        self.geometry("1000x680")
+        self.minsize(820, 560)
         self.configure(bg=WINDOW_BG)
 
         self.Vault = None
@@ -222,14 +200,10 @@ class P00PWindow(Tk.Tk):
         self.RevealAfterId = None
         self.SortColumn = "name"
         self.SortDescending = False
-        self.MascotClicks = 0
-        self.SecretSequence = SequenceLatch(
-            ("Up", "Up", "Down", "Down", "Left", "Right", "Left", "Right", "b", "a")
-        )
         self.SearchText = Tk.StringVar()
-        self.PathText = Tk.StringVar(value="no vault open")
-        self.StatusText = Tk.StringVar(value="Create or open a .p00p vault to begin")
-        self.ListSummaryText = Tk.StringVar(value="no vault open")
+        self.PathText = Tk.StringVar(value="no bowl open")
+        self.StatusText = Tk.StringVar(value="make or open a .p00p bowl to start")
+        self.ListSummaryText = Tk.StringVar(value="no bowl open")
 
         self.BuildStyles()
         self.BuildMenu()
@@ -238,7 +212,6 @@ class P00PWindow(Tk.Tk):
         self.BuildContent()
         self.BuildStatusBar()
         self.BindKeys()
-        self.after_idle(self.CenterWindow)
 
         DefaultPath = StartPath or Os.environ.get("P00P_FILE", Main.DEFAULT_VAULT)
         if DefaultPath and Path(DefaultPath).is_file():
@@ -246,88 +219,52 @@ class P00PWindow(Tk.Tk):
         else:
             self.UpdateControls()
 
-    def CenterWindow(self):
-        self.update_idletasks()
-        Width = 1080
-        Height = 680
-        ScreenWidth = self.winfo_screenwidth()
-        ScreenHeight = self.winfo_screenheight()
-        X = max(20, (ScreenWidth - Width) // 2)
-        Y = max(20, (ScreenHeight - Height) // 2)
-        self.geometry(f"{Width}x{Height}+{X}+{Y}")
-
     #MARK: visual stuffs
     def BuildStyles(self):
         Style = Ttk.Style(self)
-        # the launcher rejects apples broken Tk 8.5 now, so clam is safe and
-        # actually honors the colors instead of inventing charcoal rectangles.
-        Style.theme_use("clam")
-        Style.configure("Window.TFrame", background=WINDOW_BG)
+        # old macOS python ships Tk 8.5. forcing the clam theme makes its
+        # widgets render completely blank in dark mode, so keep aqua here.
         Style.configure("P00P.TFrame", background=PANEL_BG)
-        Style.configure("Card.TFrame", background=PANEL_BG, borderwidth=0,
-                        relief="flat")
         Style.configure("P00P.TLabel", background=PANEL_BG, foreground=TEXT,
-                        font=(FONT, 12))
+                        font=(FONT, 13))
         Style.configure("Muted.TLabel", background=PANEL_BG, foreground=MUTED,
                         font=(FONT, 11))
-        Style.configure("Title.TLabel", background=PANEL_BG, foreground=CREAM,
-                        font=(FONT, 32, "bold"))
-        Style.configure("Section.TLabel", background=PANEL_BG, foreground=TEXT,
-                        font=(FONT, 15, "bold"))
-        Style.configure("Eyebrow.TLabel", background=PANEL_BG, foreground=BROWN,
-                        font=(FONT, 10, "bold"))
-        Style.configure("PoopMark.TLabel", background=PANEL_BG,
-                        font=("Apple Color Emoji", 44))
-        Style.configure("DetailKey.TLabel", background=PANEL_BG, foreground=MUTED,
-                        font=(FONT, 10, "bold"))
-        Style.configure("DetailValue.TLabel", background=PANEL_BG, foreground=TEXT,
-                        font=(FONT, 12))
-        Style.configure("Warning.TLabel", background="#2b211b", foreground="#ffb47e",
-                        font=(FONT, 10, "bold"), padding=(12, 8))
-        Style.configure("Good.TLabel", background="#17251c", foreground=GREEN,
+        Style.configure("Title.TLabel", background=WINDOW_BG, foreground=CREAM,
+                        font=(FONT, 30, "bold"))
+        Style.configure("Warning.TLabel", background="#f5d4ce", foreground="#8a2f27",
                         font=(FONT, 11, "bold"), padding=(12, 8))
-        Style.configure("P00P.TButton", background=BROWN, foreground="#ffffff",
-                        font=(FONT, 11, "bold"), padding=(14, 9), borderwidth=0,
-                        relief="flat")
-        Style.map("P00P.TButton", background=[("active", BROWN_HOVER),
-                                               ("pressed", "#b96532"),
-                                               ("disabled", "#332a25")],
-                  foreground=[("disabled", "#71645d")])
+        Style.configure("Good.TLabel", background="#dcebdc", foreground="#285e33",
+                        font=(FONT, 11, "bold"), padding=(12, 8))
+        Style.configure("P00P.TButton", background=BROWN, foreground=TEXT,
+                        font=(FONT, 11, "bold"), padding=(12, 7), borderwidth=0)
+        Style.map("P00P.TButton", background=[("active", BROWN_HOVER), ("disabled", "#3d3531")],
+                  foreground=[("disabled", "#7e746e")])
         Style.configure("Quiet.TButton", background=PANEL_LIGHT, foreground=TEXT,
-                        font=(FONT, 11, "bold"), padding=(12, 8), borderwidth=0,
-                        relief="flat")
-        Style.map("Quiet.TButton", background=[("active", "#302721"),
-                                                ("pressed", "#3a2f28"),
-                                                ("disabled", "#1a1613")],
-                  foreground=[("disabled", "#6e625b")])
-        Style.configure("Danger.TButton", background="#2b1818", foreground=RED,
-                        font=(FONT, 11, "bold"), padding=(12, 8), borderwidth=0,
-                        relief="flat")
-        Style.map("Danger.TButton", background=[("active", "#3b2020"),
-                                                 ("pressed", "#4a2626")])
-        Style.configure("Search.TEntry", fieldbackground=PANEL_LIGHT, foreground=TEXT,
-                        bordercolor=PANEL_BORDER, lightcolor=PANEL_BORDER,
-                        darkcolor=PANEL_BORDER, padding=8)
+                        font=(FONT, 11), padding=(10, 7), borderwidth=0)
+        Style.map("Quiet.TButton", background=[("active", "#dec8b6"), ("disabled", "#eee6df")],
+                  foreground=[("disabled", "#9a8d85")])
+        Style.configure("Danger.TButton", background="#703c37", foreground=TEXT,
+                        font=(FONT, 11), padding=(10, 7), borderwidth=0)
+        Style.map("Danger.TButton", background=[("active", "#925049")])
         Style.configure("P00P.Treeview", background=PANEL_BG, fieldbackground=PANEL_BG,
-                        foreground=TEXT, rowheight=38, borderwidth=0, font=(FONT, 11))
-        Style.configure("P00P.Treeview.Heading", background=PANEL_LIGHT, foreground=TEXT,
-                        font=(FONT, 10, "bold"), relief="flat", padding=(8, 9))
-        Style.map("P00P.Treeview.Heading", background=[("active", "#302721")])
+                        foreground=TEXT, rowheight=34, borderwidth=0, font=(FONT, 11))
+        Style.configure("P00P.Treeview.Heading", background=PANEL_LIGHT, foreground=CREAM,
+                        font=(FONT, 11, "bold"), relief="flat")
         Style.map("P00P.Treeview", background=[("selected", BROWN)],
                   foreground=[("selected", "#ffffff")])
 
     def BuildMenu(self):
         MenuBar = Tk.Menu(self)
         FileMenu = Tk.Menu(MenuBar, tearoff=False)
-        FileMenu.add_command(label="new vault", command=self.NewVault, accelerator="Cmd+N")
-        FileMenu.add_command(label="open vault...", command=self.OpenVault, accelerator="Cmd+O")
+        FileMenu.add_command(label="new bowl", command=self.NewVault, accelerator="Cmd+N")
+        FileMenu.add_command(label="open bowl...", command=self.OpenVault, accelerator="Cmd+O")
         FileMenu.add_separator()
         FileMenu.add_command(label="quit", command=self.destroy, accelerator="Cmd+Q")
         MenuBar.add_cascade(label="file", menu=FileMenu)
 
         ToolsMenu = Tk.Menu(MenuBar, tearoff=False)
-        ToolsMenu.add_command(label="add entry", command=self.AddEntry, accelerator="Cmd+Shift+N")
-        ToolsMenu.add_command(label="audit vault", command=self.ShowAudit)
+        ToolsMenu.add_command(label="add fake login", command=self.AddEntry, accelerator="Cmd+Shift+N")
+        ToolsMenu.add_command(label="audit bowl", command=self.ShowAudit)
         ToolsMenu.add_command(label="security theater score", command=self.ShowTheater)
         ToolsMenu.add_command(label="file anatomy", command=self.ShowAnatomy)
         MenuBar.add_cascade(label="tools", menu=ToolsMenu)
@@ -338,45 +275,29 @@ class P00PWindow(Tk.Tk):
         self.configure(menu=MenuBar)
 
     def BuildHeader(self):
-        Header = Ttk.Frame(self, style="Card.TFrame", padding=(20, 10))
-        Header.pack(fill="x", padx=16, pady=(14, 4))
-        Header.columnconfigure(1, weight=1)
-        self.BuildPoopMark(Header).grid(row=0, column=0, rowspan=3, sticky="w", padx=(0, 18))
-
-        Brand = Ttk.Frame(Header, style="P00P.TFrame")
-        Brand.grid(row=0, column=1, rowspan=3, sticky="w")
-        Ttk.Label(Brand, text="LOCAL WEIRD STORAGE", style="Eyebrow.TLabel").grid(
-            row=0, column=0, sticky="w")
-        Ttk.Label(Brand, text="p00p vault", style="Title.TLabel").grid(
-            row=1, column=0, sticky="w", pady=(2, 1))
-        Ttk.Label(Brand, text="custom binary vault  •  demo credentials only",
-                  style="Muted.TLabel").grid(row=2, column=0, sticky="w")
-        Ttk.Label(Header, text="DEMO  •  NOT ENCRYPTED",
-                  style="Warning.TLabel").grid(row=0, column=2, rowspan=3, sticky="e")
-
-    def BuildPoopMark(self, Parent):
-        Mark = Ttk.Label(Parent, text="💩", style="PoopMark.TLabel", cursor="pointinghand")
-        Mark.bind("<Button-1>", self.OnMascotClick)
-        return Mark
+        Header = Ttk.Frame(self, style="P00P.TFrame", padding=(24, 18))
+        Header.pack(fill="x", padx=18, pady=(18, 8))
+        Header.columnconfigure(0, weight=1)
+        Ttk.Label(Header, text="p00p", style="Title.TLabel").grid(row=0, column=0, sticky="w")
+        Ttk.Label(Header, text="persistent 0-leak 0bject protocol",
+                  style="Muted.TLabel").grid(row=1, column=0, sticky="w")
+        Ttk.Label(Header, text="NOT REAL ENCRYPTION — ONLY USE FAKE PASSWORDS",
+                  style="Warning.TLabel").grid(row=0, column=1, rowspan=2, sticky="e")
 
     def BuildVaultBar(self):
-        Bar = Ttk.Frame(self, style="Card.TFrame", padding=(14, 8))
-        Bar.pack(fill="x", padx=16, pady=4)
+        Bar = Ttk.Frame(self, style="P00P.TFrame", padding=(16, 12))
+        Bar.pack(fill="x", padx=18, pady=8)
         Bar.columnconfigure(0, weight=1)
-        PathArea = Ttk.Frame(Bar, style="P00P.TFrame")
-        PathArea.grid(row=0, column=0, sticky="w", padx=(0, 12))
-        Ttk.Label(PathArea, text="ACTIVE VAULT", style="Eyebrow.TLabel").grid(
-            row=0, column=0, sticky="w")
-        Ttk.Label(PathArea, textvariable=self.PathText, style="P00P.TLabel").grid(
-            row=1, column=0, sticky="w")
-        Ttk.Button(Bar, text="new vault", style="Quiet.TButton", command=self.NewVault).grid(
+        Ttk.Label(Bar, textvariable=self.PathText, style="P00P.TLabel").grid(
+            row=0, column=0, sticky="w", padx=(0, 12))
+        Ttk.Button(Bar, text="new bowl", style="Quiet.TButton", command=self.NewVault).grid(
             row=0, column=1, padx=4)
-        Ttk.Button(Bar, text="open vault", style="P00P.TButton", command=self.OpenVault).grid(
+        Ttk.Button(Bar, text="open bowl", style="P00P.TButton", command=self.OpenVault).grid(
             row=0, column=2, padx=(4, 0))
 
     def BuildContent(self):
-        Content = Ttk.Frame(self, style="Window.TFrame")
-        Content.pack(fill="both", expand=True, padx=16, pady=4)
+        Content = Ttk.Frame(self, style="P00P.TFrame")
+        Content.pack(fill="both", expand=True, padx=18, pady=8)
         Content.columnconfigure(0, weight=3)
         Content.columnconfigure(1, weight=2)
         Content.rowconfigure(0, weight=1)
@@ -384,47 +305,43 @@ class P00PWindow(Tk.Tk):
         self.BuildDetails(Content)
 
     def BuildEntryList(self, Parent):
-        Left = Ttk.Frame(Parent, style="Card.TFrame", padding=18)
-        Left.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+        Left = Ttk.Frame(Parent, style="P00P.TFrame", padding=14)
+        Left.grid(row=0, column=0, sticky="nsew", padx=(0, 5))
         Left.columnconfigure(0, weight=1)
-        Left.rowconfigure(4, weight=1)
+        Left.rowconfigure(3, weight=1)
 
         Heading = Ttk.Frame(Left, style="P00P.TFrame")
         Heading.grid(row=0, column=0, sticky="ew", pady=(0, 10))
         Heading.columnconfigure(0, weight=1)
-        Ttk.Label(Heading, text="entries", style="Section.TLabel").grid(
-            row=0, column=0, sticky="w")
-        self.AddButton = Ttk.Button(Heading, text="+ add entry", style="P00P.TButton",
+        Ttk.Label(Heading, text="fake logins", style="P00P.TLabel").grid(row=0, column=0, sticky="w")
+        self.AddButton = Ttk.Button(Heading, text="+ add", style="P00P.TButton",
                                    command=self.AddEntry)
         self.AddButton.grid(row=0, column=1, sticky="e")
 
-        Ttk.Label(Left, text="Search names, usernames, and notes", style="Muted.TLabel").grid(
-            row=1, column=0, sticky="w", pady=(2, 5))
-        Search = Ttk.Entry(Left, textvariable=self.SearchText, font=(FONT, 12),
-                           style="Search.TEntry")
-        Search.grid(row=2, column=0, sticky="ew", pady=(0, 10))
+        Search = Ttk.Entry(Left, textvariable=self.SearchText, font=(FONT, 12))
+        Search.grid(row=1, column=0, sticky="ew", pady=(0, 10), ipady=5)
         Search.insert(0, "")
         self.SearchEntry = Search
         self.SearchText.trace_add("write", lambda *_: self.RefreshList())
 
         Ttk.Label(Left, textvariable=self.ListSummaryText, style="Muted.TLabel").grid(
-            row=3, column=0, sticky="w", pady=(0, 8))
+            row=2, column=0, sticky="w", pady=(0, 8))
 
         TreeFrame = Ttk.Frame(Left, style="P00P.TFrame")
-        TreeFrame.grid(row=4, column=0, sticky="nsew")
+        TreeFrame.grid(row=3, column=0, sticky="nsew")
         TreeFrame.columnconfigure(0, weight=1)
         TreeFrame.rowconfigure(0, weight=1)
         self.EntryTree = Ttk.Treeview(TreeFrame, columns=("username", "health", "updated"),
-                                      show="tree headings", style="P00P.Treeview", height=5)
+                                      show="tree headings", style="P00P.Treeview")
         self.EntryTree.heading("#0", text="name", command=lambda: self.ChangeSort("name"))
         self.EntryTree.heading("username", text="username",
                                command=lambda: self.ChangeSort("username"))
         self.EntryTree.heading("health", text="health", command=lambda: self.ChangeSort("health"))
         self.EntryTree.heading("updated", text="updated", command=lambda: self.ChangeSort("updated"))
-        self.EntryTree.column("#0", width=155, minwidth=110)
-        self.EntryTree.column("username", width=120, minwidth=90)
-        self.EntryTree.column("health", width=76, minwidth=68, anchor="center")
-        self.EntryTree.column("updated", width=90, minwidth=82, anchor="center")
+        self.EntryTree.column("#0", width=190, minwidth=120)
+        self.EntryTree.column("username", width=140, minwidth=100)
+        self.EntryTree.column("health", width=80, minwidth=70, anchor="center")
+        self.EntryTree.column("updated", width=105, minwidth=90, anchor="center")
         Scroll = Ttk.Scrollbar(TreeFrame, orient="vertical", command=self.EntryTree.yview)
         self.EntryTree.configure(yscrollcommand=Scroll.set)
         self.EntryTree.grid(row=0, column=0, sticky="nsew")
@@ -433,11 +350,11 @@ class P00PWindow(Tk.Tk):
         self.EntryTree.bind("<Double-1>", lambda _Event: self.EditEntry())
 
     def BuildDetails(self, Parent):
-        Right = Ttk.Frame(Parent, style="Card.TFrame", padding=18)
-        Right.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
+        Right = Ttk.Frame(Parent, style="P00P.TFrame", padding=18)
+        Right.grid(row=0, column=1, sticky="nsew", padx=(5, 0))
         Right.columnconfigure(0, weight=1)
-        Ttk.Label(Right, text="entry details", style="Section.TLabel").grid(
-            row=0, column=0, sticky="w", pady=(0, 16))
+        Ttk.Label(Right, text="selected poop", style="P00P.TLabel").grid(
+            row=0, column=0, sticky="w", pady=(0, 18))
 
         self.NameValue = self.DetailRow(Right, 1, "name")
         self.UsernameValue = self.DetailRow(Right, 2, "username")
@@ -447,51 +364,49 @@ class P00PWindow(Tk.Tk):
 
         Ttk.Label(Right, text="notes", style="Muted.TLabel").grid(
             row=6, column=0, sticky="w", pady=(16, 4))
-        self.NotesText = Tk.Text(Right, width=1, height=3, wrap="word", bg=PANEL_LIGHT, fg=TEXT,
+        self.NotesText = Tk.Text(Right, height=6, wrap="word", bg=PANEL_LIGHT, fg=TEXT,
                                  insertbackground=TEXT, relief="flat", font=(FONT, 11),
-                                 padx=12, pady=10, state="disabled",
-                                 highlightthickness=1, highlightbackground=PANEL_BORDER)
+                                 padx=10, pady=8, state="disabled")
         self.NotesText.grid(row=7, column=0, sticky="nsew")
         Right.rowconfigure(7, weight=1)
 
         Buttons = Ttk.Frame(Right, style="P00P.TFrame")
         Buttons.grid(row=8, column=0, sticky="ew", pady=(16, 0))
-        Buttons.columnconfigure((0, 1, 2), weight=1)
+        Buttons.columnconfigure((0, 1), weight=1)
         self.RevealButton = Ttk.Button(Buttons, text="reveal", style="Quiet.TButton",
                                       command=self.TogglePassword)
-        self.RevealButton.grid(row=0, column=0, sticky="ew", padx=(0, 3), pady=4)
+        self.RevealButton.grid(row=0, column=0, sticky="ew", padx=(0, 4), pady=4)
         self.CopyButton = Ttk.Button(Buttons, text="copy password", style="Quiet.TButton",
                                     command=self.CopyPassword)
-        self.CopyButton.grid(row=0, column=1, sticky="ew", padx=3, pady=4)
+        self.CopyButton.grid(row=0, column=1, sticky="ew", padx=(4, 0), pady=4)
         self.CopyUsernameButton = Ttk.Button(Buttons, text="copy username", style="Quiet.TButton",
                                             command=self.CopyUsername)
-        self.CopyUsernameButton.grid(row=0, column=2, sticky="ew", padx=(3, 0), pady=4)
+        self.CopyUsernameButton.grid(row=1, column=0, columnspan=2, sticky="ew", pady=4)
         self.EditButton = Ttk.Button(Buttons, text="edit", style="P00P.TButton",
                                     command=self.EditEntry)
-        self.EditButton.grid(row=1, column=0, columnspan=2, sticky="ew", padx=(0, 3), pady=4)
+        self.EditButton.grid(row=2, column=0, sticky="ew", padx=(0, 4), pady=4)
         self.RemoveButton = Ttk.Button(Buttons, text="remove", style="Danger.TButton",
                                       command=self.RemoveEntry)
-        self.RemoveButton.grid(row=1, column=2, sticky="ew", padx=(3, 0), pady=4)
+        self.RemoveButton.grid(row=2, column=1, sticky="ew", padx=(4, 0), pady=4)
 
     def DetailRow(self, Parent, Row, Label):
         Box = Ttk.Frame(Parent, style="P00P.TFrame")
-        Box.grid(row=Row, column=0, sticky="ew", pady=2)
+        Box.grid(row=Row, column=0, sticky="ew", pady=5)
         Box.columnconfigure(1, weight=1)
-        Ttk.Label(Box, text=Label.upper(), style="DetailKey.TLabel").grid(
-            row=0, column=0, sticky="w", padx=(0, 14))
-        Value = Ttk.Label(Box, text="—", style="DetailValue.TLabel", anchor="w")
+        Ttk.Label(Box, text=Label, style="Muted.TLabel", width=10).grid(row=0, column=0, sticky="w")
+        Value = Ttk.Label(Box, text="—", style="P00P.TLabel", anchor="w")
         Value.grid(row=0, column=1, sticky="ew")
         return Value
 
     def BuildStatusBar(self):
-        Bar = Ttk.Frame(self, style="Card.TFrame", padding=(12, 6))
-        Bar.pack(side="bottom", fill="x", padx=16, pady=(4, 14))
+        Bar = Ttk.Frame(self, style="P00P.TFrame", padding=(14, 8))
+        Bar.pack(fill="x", padx=18, pady=(8, 18))
         Ttk.Label(Bar, textvariable=self.StatusText, style="Muted.TLabel").pack(side="left")
         Ttk.Button(Bar, text="audit", style="Quiet.TButton", command=self.ShowAudit).pack(
             side="right", padx=(6, 0))
-        Ttk.Button(Bar, text="security theater", style="Quiet.TButton", command=self.ShowTheater).pack(
+        Ttk.Button(Bar, text="vibes", style="Quiet.TButton", command=self.ShowTheater).pack(
             side="right", padx=(6, 0))
-        Ttk.Button(Bar, text="file anatomy", style="Quiet.TButton", command=self.ShowAnatomy).pack(
+        Ttk.Button(Bar, text="file guts", style="Quiet.TButton", command=self.ShowAnatomy).pack(
             side="right")
 
     def BindKeys(self):
@@ -503,44 +418,17 @@ class P00PWindow(Tk.Tk):
             self.bind_all(Shortcut, lambda _Event: self.AddEntry())
         for Shortcut in ("<Command-f>", "<Control-f>"):
             self.bind_all(Shortcut, lambda _Event: self.SearchEntry.focus_set())
-        self.bind_all("<KeyPress>", self.OnSecretKey, add="+")
         self.EntryTree.bind("<Return>", lambda _Event: self.EditEntry())
         self.EntryTree.bind("<Delete>", lambda _Event: self.RemoveEntry())
-
-    #MARK: secret sewer stuffs
-    def OnSecretKey(self, Event):
-        if self.SecretSequence.Feed(Event.keysym):
-            SecretWindow(
-                self,
-                "Sewer mode unlocked",
-                "🚽",
-                "The ancient directional ritual worked.\n\n"
-                "You now have administrator access to absolutely nothing.",
-            )
-            self.SetStatus("Secret sewer mode unlocked")
-
-    def OnMascotClick(self, _Event=None):
-        self.MascotClicks += 1
-        if self.MascotClicks < 5:
-            return
-        self.MascotClicks = 0
-        SecretWindow(
-            self,
-            "Golden poop discovered",
-            "🏆",
-            "You clicked the mascot five times. This achievement has no value, "
-            "cannot be exported, and adds zero security.",
-        )
-        self.SetStatus("Easter egg found: golden poop")
 
     #MARK: opening and saving bowls
     def NewVault(self):
         Filename = FileDialog.asksaveasfilename(
             parent=self,
-            title="Save the new .p00p vault",
+            title="where should the new password bowl go?",
             defaultextension=".p00p",
             initialfile=".passwords.p00p",
-            filetypes=(("p00p vaults", "*.p00p *.poop"), ("all files", "*")),
+            filetypes=(("p00p bowls", "*.p00p *.poop"), ("all files", "*")),
         )
         if not Filename:
             return
@@ -549,7 +437,7 @@ class P00PWindow(Tk.Tk):
             Vault = Main.NewVault()
             Main.SaveVault(FilePath, Vault)
         except Main.P00PError as Exc:
-            self.ShowError("Could not create the vault", Exc)
+            self.ShowError("couldnt make the bowl", Exc)
             return
         self.Vault = Vault
         self.FilePath = FilePath
@@ -559,13 +447,13 @@ class P00PWindow(Tk.Tk):
         self.SelectedName = None
         self.SearchText.set("")
         self.RefreshList()
-        self.SetStatus("New empty vault created — demo credentials only")
+        self.SetStatus("new empty bowl made. try not to put a real password in it")
 
     def OpenVault(self):
         Filename = FileDialog.askopenfilename(
             parent=self,
-            title="Open a .p00p vault",
-            filetypes=(("p00p vaults", "*.p00p *.poop"), ("all files", "*")),
+            title="pick a suspicious password bowl",
+            filetypes=(("p00p bowls", "*.p00p *.poop"), ("all files", "*")),
         )
         if Filename:
             self.LoadPath(Path(Filename))
@@ -575,7 +463,7 @@ class P00PWindow(Tk.Tk):
             Vault = Main.LoadVault(Path(FilePath))
         except Main.P00PError as Exc:
             if not Quiet:
-                self.ShowError("Could not open that vault", Exc)
+                self.ShowError("that bowl is broken or fake", Exc)
             return False
         self.Vault = Vault
         self.FilePath = Path(FilePath)
@@ -584,14 +472,14 @@ class P00PWindow(Tk.Tk):
         self.SelectedName = None
         self.PasswordVisible = False
         self.RefreshList()
-        self.SetStatus(f"Opened {len(Vault['entries'])} vault entr{'y' if len(Vault['entries']) == 1 else 'ies'}")
+        self.SetStatus(f"opened {len(Vault['entries'])} fake login(s)")
         return True
 
     def SaveCandidate(self, Candidate, Status):
         try:
             Main.SaveVault(self.FilePath, Candidate)
         except Main.P00PError as Exc:
-            self.ShowError("Could not save the vault", Exc)
+            self.ShowError("the bowl refused to save", Exc)
             return False
         self.Vault = Candidate
         self.RefreshList()
@@ -606,7 +494,7 @@ class P00PWindow(Tk.Tk):
         for Item in self.EntryTree.get_children():
             self.EntryTree.delete(Item)
         if self.Vault is None:
-            self.ListSummaryText.set("no vault open")
+            self.ListSummaryText.set("no bowl open")
             self.ShowDetails(None)
             self.UpdateControls()
             return
@@ -621,8 +509,8 @@ class P00PWindow(Tk.Tk):
 
         Summary = VaultSummary(self.Vault, Query)
         self.ListSummaryText.set(
-            f"{Summary['shown']} shown  •  {Summary['total']} total  •  "
-            f"{Summary['needs_work']} need attention"
+            f"{Summary['shown']} shown • {Summary['total']} total • "
+            f"{Summary['needs_work']} need work"
         )
         self.UpdateSortHeadings()
         if Selected in Names:
@@ -669,7 +557,7 @@ class P00PWindow(Tk.Tk):
     def ShowDetails(self, Name):
         if not Name or self.Vault is None or Name not in self.Vault["entries"]:
             Values = ("—", "—", "—", "—", "—")
-            Notes = "Select an entry to inspect its details"
+            Notes = "pick a fake login from the list"
         else:
             Entry = self.Vault["entries"][Name]
             Password = Entry.get("password", "")
@@ -701,9 +589,9 @@ class P00PWindow(Tk.Tk):
     #MARK: changing the password stuffs
     def AddEntry(self):
         if self.Vault is None:
-            MessageBox.showinfo("No vault open", "Create or open a .p00p vault first", parent=self)
+            MessageBox.showinfo("no bowl yet", "make or open a .p00p bowl first", parent=self)
             return
-        EntryDialog(self, Title="Add vault entry", OnSave=self.SaveNewEntry)
+        EntryDialog(self, Title="add fake login", OnSave=self.SaveNewEntry)
 
     def SaveNewEntry(self, Data):
         Name = Data.pop("name")
@@ -726,7 +614,7 @@ class P00PWindow(Tk.Tk):
         if not self.SelectedName or self.Vault is None:
             return
         Entry = Copy.deepcopy(self.Vault["entries"][self.SelectedName])
-        EntryDialog(self, Title="Edit vault entry", OnSave=self.SaveEditedEntry,
+        EntryDialog(self, Title="edit fake login", OnSave=self.SaveEditedEntry,
                     Name=self.SelectedName, Entry=Entry)
 
     def SaveEditedEntry(self, Data):
@@ -754,7 +642,7 @@ class P00PWindow(Tk.Tk):
             return
         Name = self.SelectedName
         Confirmed = MessageBox.askyesno(
-            "Remove this entry?", f"Remove {Name!r} from the vault?\n\nThis cannot be undone.",
+            "flush this entry?", f"remove {Name!r} from the bowl?\n\nthis cannot be undone.",
             parent=self, icon="warning",
         )
         if not Confirmed:
@@ -821,7 +709,7 @@ class P00PWindow(Tk.Tk):
     #MARK: report windows
     def ShowAudit(self):
         if self.Vault is None:
-            MessageBox.showinfo("No vault open", "Open a vault before auditing it", parent=self)
+            MessageBox.showinfo("no bowl yet", "open a bowl before auditing it", parent=self)
             return
         Findings = AuditVault(self.Vault, self.FilePath)
         if Findings:
@@ -831,11 +719,11 @@ class P00PWindow(Tk.Tk):
             Lines = ["no basic hygiene problems found :D"]
         Lines.extend(("", "this only checks basic patterns.",
                       "the entire p00p format is still not real encryption."))
-        TextWindow(self, "Vault audit", "\n".join(Lines))
+        TextWindow(self, "bowl audit", "\n".join(Lines))
 
     def ShowTheater(self):
         if self.FilePath is None:
-            MessageBox.showinfo("No vault open", "Open a vault before measuring its vibes", parent=self)
+            MessageBox.showinfo("no bowl yet", "open a bowl before measuring its vibes", parent=self)
             return
         try:
             Report = Main.SecurityTheaterReport(self.FilePath).AsText()
@@ -846,14 +734,14 @@ class P00PWindow(Tk.Tk):
 
     def ShowAnatomy(self):
         if self.FilePath is None:
-            MessageBox.showinfo("No vault open", "Open a vault before inspecting it", parent=self)
+            MessageBox.showinfo("no bowl yet", "open a bowl before dissecting it", parent=self)
             return
         try:
             Report = FormatAnatomy(self.FilePath)
         except Main.P00PError as Exc:
-            self.ShowError("Could not inspect the vault", Exc)
+            self.ShowError("couldnt inspect the bowl", Exc)
             return
-        TextWindow(self, "File anatomy", Report, Monospace=True)
+        TextWindow(self, "file guts", Report, Monospace=True)
 
     def ShowAbout(self):
         MessageBox.showwarning(
@@ -945,7 +833,7 @@ class EntryDialog(Tk.Toplevel):
         Buttons.columnconfigure((0, 1), weight=1)
         Ttk.Button(Buttons, text="cancel", style="Quiet.TButton", command=self.destroy).grid(
             row=0, column=0, sticky="ew", padx=(0, 5))
-        Ttk.Button(Buttons, text="save entry", style="P00P.TButton", command=self.Save).grid(
+        Ttk.Button(Buttons, text="save fake login", style="P00P.TButton", command=self.Save).grid(
             row=0, column=1, sticky="ew", padx=(5, 0))
 
         self.bind("<Escape>", lambda _Event: self.destroy())
@@ -1014,41 +902,6 @@ class EntryDialog(Tk.Toplevel):
             self.destroy()
 
 
-#MARK: hidden achievement window thingy
-class SecretWindow(Tk.Toplevel):
-    def __init__(self, Parent, Title, Emoji, Message):
-        super().__init__(Parent)
-        self.Parent = Parent
-        self.title(Title)
-        self.geometry("480x320")
-        self.resizable(False, False)
-        self.configure(bg=WINDOW_BG)
-        self.transient(Parent)
-
-        Frame = Ttk.Frame(self, style="Card.TFrame", padding=28)
-        Frame.pack(fill="both", expand=True, padx=14, pady=14)
-        Frame.columnconfigure(0, weight=1)
-        Ttk.Label(Frame, text=Emoji, style="PoopMark.TLabel").grid(
-            row=0, column=0, pady=(4, 12))
-        Ttk.Label(Frame, text=Title, style="Section.TLabel").grid(
-            row=1, column=0, pady=(0, 10))
-        Ttk.Label(Frame, text=Message, style="Muted.TLabel", wraplength=390,
-                  justify="center").grid(row=2, column=0, sticky="ew")
-        Ttk.Button(Frame, text="return to the vault", style="P00P.TButton",
-                   command=self.destroy).grid(row=3, column=0, pady=(22, 0))
-
-        self.bind("<Escape>", lambda _Event: self.destroy())
-        self.after_idle(self.CenterOverParent)
-
-    def CenterOverParent(self):
-        self.update_idletasks()
-        Width = 480
-        Height = 320
-        X = self.Parent.winfo_rootx() + max(0, (self.Parent.winfo_width() - Width) // 2)
-        Y = self.Parent.winfo_rooty() + max(0, (self.Parent.winfo_height() - Height) // 2)
-        self.geometry(f"{Width}x{Height}+{X}+{Y}")
-
-
 #MARK: report window thingy
 class TextWindow(Tk.Toplevel):
     def __init__(self, Parent, Title, Content, Monospace=False):
@@ -1076,8 +929,8 @@ class TextWindow(Tk.Toplevel):
 
 
 def RunGui(StartPath=None):
-    from ctk_gui import RunModernGui
-    RunModernGui(StartPath=StartPath)
+    App = P00PWindow(StartPath=StartPath)
+    App.mainloop()
 
 
 if __name__ == "__main__":

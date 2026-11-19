@@ -13,35 +13,95 @@ from tkinter import messagebox as MessageBox
 import customtkinter as Ctk
 
 import main as Main
-from gui import AuditVault, EntryRows, FormatAnatomy, GeneratorLength
-from gui import PasswordHealthSummary, PasswordMask, SequenceLatch, VaultSummary
+from gui import AuditVault, EntryRows, GeneratorLength
+from gui import PasswordHealthSummary, PasswordMask, VaultSummary
 
 
-#MARK: the not-ugly colors
-BG = "#0b0e13"
-SIDEBAR = "#0f1319"
-SURFACE = "#151a22"
-SURFACE_HIGH = "#1b222c"
-SURFACE_HOVER = "#232c38"
-BORDER = "#293341"
-TEXT = "#f4f7fb"
-MUTED = "#8f9baa"
-ACCENT = "#f08a4b"
-ACCENT_HOVER = "#ff9c61"
-GREEN = "#55d491"
-RED = "#ff6f7d"
-WARNING = "#ffb27d"
-FONT = "Avenir Next"
-MONO_FONT = "SF Mono"
+#MARK: the blocky deep-space terminal colors
+# structural cues from chunky 1970s computer screens: black glass, dull metal,
+# phosphor green, hard rectangles, and no startup-founder rounded corners.
+BG = "#050806"
+SIDEBAR = "#080c09"
+SIDEBAR_CARD = "#111912"
+SIDEBAR_HOVER = "#18251a"
+SIDEBAR_TEXT = "#d6f6c7"
+SIDEBAR_MUTED = "#6f8b6c"
+SURFACE = "#070b08"
+SURFACE_HIGH = "#0d150f"
+SURFACE_HOVER = "#172319"
+BORDER = "#568f4d"
+TITLE_BAR = "#718071"
+TEXT = "#d7f7c8"
+MUTED = "#789176"
+ACCENT = "#b6ff77"
+ACCENT_HOVER = "#d2ffa8"
+BUTTON_TEXT = "#071008"
+GREEN = "#b6ff77"
+RED = "#ff766d"
+WARNING = "#e8ff9a"
+FONT = "Menlo"
+MONO_FONT = "Menlo"
 
 
 Ctk.set_appearance_mode("dark")
 
 
+class SequenceLatch:
+    def __init__(self, Pattern):
+        self.Pattern = tuple(Pattern)
+        self.Position = 0
+
+    def Feed(self, Key):
+        if not self.Pattern:
+            return False
+        if Key == self.Pattern[self.Position]:
+            self.Position += 1
+        elif Key == self.Pattern[0]:
+            self.Position = 1
+        else:
+            self.Position = 0
+        if self.Position == len(self.Pattern):
+            self.Position = 0
+            return True
+        return False
+
+
+def FormatAnatomy(FilePath):
+    Blob = Main.ReadVaultBlob(Path(FilePath))
+    Header = Main.ParseHeader(Blob)
+    Vault = Main.DecodeVault(Blob)
+    Lines = [
+        f"file:          {FilePath}",
+        f"magic:         {Main.MAGIC!r}",
+        f"version:       {Header['version']}",
+        f"salt:          {Header['salt'].hex()}",
+        f"header bytes:  {Header['header_size']}",
+        f"payload bytes: {Header['payload_size']}",
+        f"checksum:      {Header['digest'].hex()}",
+        f"total bytes:   {Header['file_size']}",
+        f"decoded:       {len(Vault['entries'])} entries, integrity check passed",
+    ]
+    if hasattr(Main, "PayloadRitualSummary"):
+        Lines.append(f"poopline:      {Main.PayloadRitualSummary(Vault, Header['salt'])}")
+    return "\n".join(Lines)
+
+
+def SecurityTheaterReport(FilePath):
+    if hasattr(Main, "SecurityTheaterReport"):
+        return Main.SecurityTheaterReport(FilePath)
+    import poopline as Poopline
+    import theater as Theater
+    Blob = Main.ReadVaultBlob(Path(FilePath))
+    Header = Main.ParseHeader(Blob)
+    Vault = Main.DecodeVault(Blob)
+    Receipts = Poopline.InspectPayloadRitual(Vault, Header["salt"], Main.CAMOUFLAGE_KEY)
+    return Theater.ScoreSecurityTheater(Vault, FilePath, Blob, Header, Receipts)
+
+
 class ModernP00PWindow(Ctk.CTk):
     def __init__(self, StartPath=None):
         super().__init__(fg_color=BG)
-        self.title("p00p weird storage")
+        self.title("p00p — weird storage vault")
         self.geometry("1120x700")
         self.minsize(960, 620)
 
@@ -97,9 +157,6 @@ class ModernP00PWindow(Ctk.CTk):
 
         ToolsMenu = Tk.Menu(MenuBar, tearoff=False)
         ToolsMenu.add_command(label="Add entry", command=self.AddEntry, accelerator="Cmd+Shift+N")
-        ToolsMenu.add_command(label="Audit vault", command=self.ShowAudit)
-        ToolsMenu.add_command(label="Security theater", command=self.ShowTheater)
-        ToolsMenu.add_command(label="File anatomy", command=self.ShowAnatomy)
         MenuBar.add_cascade(label="Tools", menu=ToolsMenu)
 
         HelpMenu = Tk.Menu(MenuBar, tearoff=False)
@@ -108,42 +165,33 @@ class ModernP00PWindow(Ctk.CTk):
         self.configure(menu=MenuBar)
 
     def BuildSidebar(self):
-        Sidebar = Ctk.CTkFrame(self, width=218, corner_radius=0, fg_color=SIDEBAR)
+        Sidebar = Ctk.CTkFrame(
+            self, width=205, corner_radius=0, fg_color=SIDEBAR,
+            border_width=2, border_color=BORDER,
+        )
         Sidebar.grid(row=0, column=0, sticky="nsew")
         Sidebar.grid_propagate(False)
         Sidebar.grid_columnconfigure(0, weight=1)
-        Sidebar.grid_rowconfigure(8, weight=1)
+        Sidebar.grid_rowconfigure(4, weight=1)
 
         self.Mascot = Ctk.CTkLabel(
-            Sidebar, text="💩", font=Ctk.CTkFont(family="Apple Color Emoji", size=42),
+            Sidebar,
+            text="💩",
+            font=Ctk.CTkFont(family="Apple Color Emoji", size=54),
             cursor="pointinghand",
         )
-        self.Mascot.grid(row=0, column=0, sticky="w", padx=24, pady=(28, 2))
+        self.Mascot.grid(row=0, column=0, sticky="w", padx=20, pady=(18, 0))
         self.Mascot.bind("<Button-1>", self.OnMascotClick)
         Ctk.CTkLabel(
-            Sidebar, text="p00p", text_color=TEXT,
-            font=Ctk.CTkFont(family=FONT, size=28, weight="bold"),
-        ).grid(row=1, column=0, sticky="w", padx=24)
+            Sidebar, text="P00P", text_color=SIDEBAR_TEXT,
+            font=Ctk.CTkFont(family=FONT, size=27, weight="bold"),
+        ).grid(row=1, column=0, sticky="w", padx=24, pady=(0, 0))
         Ctk.CTkLabel(
-            Sidebar, text="WEIRD STORAGE", text_color=ACCENT,
+            Sidebar, text="WEIRD STORAGE // 01", text_color=ACCENT,
             font=Ctk.CTkFont(family=FONT, size=10, weight="bold"),
         ).grid(row=2, column=0, sticky="w", padx=25, pady=(0, 28))
 
-        self.SidebarButton(Sidebar, 3, "Vault", self.FocusSearch, Active=True)
-        self.SidebarButton(Sidebar, 4, "Audit", self.ShowAudit)
-        self.SidebarButton(Sidebar, 5, "Security theater", self.ShowTheater)
-        self.SidebarButton(Sidebar, 6, "File anatomy", self.ShowAnatomy)
-
-        WarningCard = Ctk.CTkFrame(Sidebar, fg_color=SURFACE, corner_radius=12)
-        WarningCard.grid(row=9, column=0, sticky="ew", padx=16, pady=18)
-        Ctk.CTkLabel(
-            WarningCard, text="DEMO ONLY", text_color=WARNING,
-            font=Ctk.CTkFont(family=FONT, size=10, weight="bold"),
-        ).pack(anchor="w", padx=14, pady=(12, 2))
-        Ctk.CTkLabel(
-            WarningCard, text="Camouflage is not\nencryption.", text_color=MUTED,
-            justify="left", font=Ctk.CTkFont(family=FONT, size=11),
-        ).pack(anchor="w", padx=14, pady=(0, 12))
+        self.SidebarButton(Sidebar, 3, "VAULT", self.FocusSearch, Active=True)
 
     def SidebarButton(self, Parent, Row, TextValue, Command, Active=False):
         Button = Ctk.CTkButton(
@@ -151,11 +199,13 @@ class ModernP00PWindow(Ctk.CTk):
             text=TextValue,
             command=Command,
             height=42,
-            corner_radius=9,
+            corner_radius=0,
             anchor="w",
-            fg_color=SURFACE_HIGH if Active else "transparent",
-            hover_color=SURFACE_HOVER,
-            text_color=TEXT if Active else MUTED,
+            fg_color=SIDEBAR_CARD if Active else "transparent",
+            hover_color=SIDEBAR_HOVER,
+            text_color=SIDEBAR_TEXT if Active else SIDEBAR_MUTED,
+            border_width=1,
+            border_color=BORDER,
             font=Ctk.CTkFont(family=FONT, size=13, weight="bold" if Active else "normal"),
         )
         Button.grid(row=Row, column=0, sticky="ew", padx=14, pady=3)
@@ -178,13 +228,16 @@ class ModernP00PWindow(Ctk.CTk):
         self.BuildStatus(Workspace)
 
     def BuildToolbar(self, Parent):
-        Toolbar = Ctk.CTkFrame(Parent, fg_color="transparent", corner_radius=0)
-        Toolbar.grid(row=0, column=0, sticky="ew", padx=22, pady=(20, 14))
+        Toolbar = Ctk.CTkFrame(
+            Parent, fg_color=SURFACE, corner_radius=0,
+            border_width=2, border_color=BORDER,
+        )
+        Toolbar.grid(row=0, column=0, sticky="ew", padx=20, pady=(18, 12))
         Toolbar.grid_columnconfigure(0, weight=1)
         PathBox = Ctk.CTkFrame(Toolbar, fg_color="transparent")
-        PathBox.grid(row=0, column=0, sticky="w")
+        PathBox.grid(row=0, column=0, sticky="w", padx=14, pady=8)
         Ctk.CTkLabel(
-            PathBox, text="ACTIVE VAULT", text_color=ACCENT,
+            PathBox, text="ACTIVE VAULT //", text_color=WARNING,
             font=Ctk.CTkFont(family=FONT, size=10, weight="bold"),
         ).pack(anchor="w")
         Ctk.CTkLabel(
@@ -192,57 +245,59 @@ class ModernP00PWindow(Ctk.CTk):
             font=Ctk.CTkFont(family=FONT, size=15, weight="bold"),
         ).pack(anchor="w")
         Ctk.CTkButton(
-            Toolbar, text="New vault", command=self.NewVault, width=108, height=38,
+            Toolbar, text="NEW VAULT", command=self.NewVault, width=108, height=36,
             fg_color=SURFACE_HIGH, hover_color=SURFACE_HOVER, text_color=TEXT,
-            corner_radius=10, font=Ctk.CTkFont(family=FONT, size=12, weight="bold"),
-        ).grid(row=0, column=1, padx=(8, 4))
+            corner_radius=0, border_width=1, border_color=BORDER,
+            font=Ctk.CTkFont(family=FONT, size=11, weight="bold"),
+        ).grid(row=0, column=1, padx=(8, 4), pady=8)
         Ctk.CTkButton(
-            Toolbar, text="Open vault", command=self.OpenVault, width=112, height=38,
-            fg_color=ACCENT, hover_color=ACCENT_HOVER, text_color="#1a0f09",
-            corner_radius=10, font=Ctk.CTkFont(family=FONT, size=12, weight="bold"),
-        ).grid(row=0, column=2, padx=(4, 0))
+            Toolbar, text="OPEN VAULT", command=self.OpenVault, width=112, height=36,
+            fg_color=ACCENT, hover_color=ACCENT_HOVER, text_color=BUTTON_TEXT,
+            corner_radius=0, font=Ctk.CTkFont(family=FONT, size=11, weight="bold"),
+        ).grid(row=0, column=2, padx=(4, 10), pady=8)
 
     #MARK: entry list stuffs
     def BuildEntryPane(self, Parent):
-        Pane = Ctk.CTkFrame(Parent, fg_color=SURFACE, corner_radius=16,
-                           border_width=1, border_color=BORDER)
+        Pane = Ctk.CTkFrame(Parent, fg_color=SURFACE, corner_radius=0,
+                           border_width=2, border_color=BORDER)
         Pane.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
         Pane.grid_columnconfigure(0, weight=1)
         Pane.grid_rowconfigure(5, weight=1)
 
-        Header = Ctk.CTkFrame(Pane, fg_color="transparent")
-        Header.grid(row=0, column=0, sticky="ew", padx=18, pady=(18, 12))
+        Header = Ctk.CTkFrame(Pane, fg_color=TITLE_BAR, corner_radius=0)
+        Header.grid(row=0, column=0, sticky="ew")
         Header.grid_columnconfigure(0, weight=1)
         Ctk.CTkLabel(
-            Header, text="Entries", text_color=TEXT,
-            font=Ctk.CTkFont(family=FONT, size=18, weight="bold"),
-        ).grid(row=0, column=0, sticky="w")
+            Header, text="VAULT INDEX", text_color=BUTTON_TEXT,
+            font=Ctk.CTkFont(family=FONT, size=15, weight="bold"),
+        ).grid(row=0, column=0, sticky="w", padx=12, pady=7)
         self.AddButton = Ctk.CTkButton(
-            Header, text="+  Add entry", command=self.AddEntry, width=112, height=36,
-            fg_color=ACCENT, hover_color=ACCENT_HOVER, text_color="#1a0f09",
-            corner_radius=10, font=Ctk.CTkFont(family=FONT, size=12, weight="bold"),
+            Header, text="ADD ENTRY +", command=self.AddEntry, width=112, height=28,
+            fg_color=ACCENT, hover_color=ACCENT_HOVER, text_color=BUTTON_TEXT,
+            corner_radius=0, font=Ctk.CTkFont(family=FONT, size=10, weight="bold"),
         )
-        self.AddButton.grid(row=0, column=1, sticky="e")
+        self.AddButton.grid(row=0, column=1, sticky="e", padx=6, pady=5)
 
         self.SearchEntry = Ctk.CTkEntry(
-            Pane, textvariable=self.SearchText, placeholder_text="Search entries…",
-            height=40, corner_radius=10, fg_color=SURFACE_HIGH, border_color=BORDER,
+            Pane, textvariable=self.SearchText, placeholder_text="SEARCH VAULT...",
+            height=38, corner_radius=0, fg_color=SURFACE_HIGH, border_color=BORDER,
+            border_width=2,
             text_color=TEXT, placeholder_text_color=MUTED,
             font=Ctk.CTkFont(family=FONT, size=12),
         )
-        self.SearchEntry.grid(row=1, column=0, sticky="ew", padx=18)
+        self.SearchEntry.grid(row=1, column=0, sticky="ew", padx=12, pady=(12, 0))
         self.SearchText.trace_add("write", lambda *_: self.RefreshList())
 
         SortBar = Ctk.CTkFrame(Pane, fg_color="transparent")
         SortBar.grid(row=2, column=0, sticky="ew", padx=18, pady=(10, 4))
         SortBar.grid_columnconfigure(1, weight=1)
         Ctk.CTkLabel(
-            SortBar, text="Sort", text_color=MUTED,
+            SortBar, text="SORT //", text_color=MUTED,
             font=Ctk.CTkFont(family=FONT, size=11),
         ).grid(row=0, column=0, padx=(0, 8))
         self.SortMenu = Ctk.CTkOptionMenu(
             SortBar, values=["name", "username", "health", "updated"],
-            command=self.ChangeSort, width=120, height=30, corner_radius=8,
+            command=self.ChangeSort, width=120, height=30, corner_radius=0,
             fg_color=SURFACE_HIGH, button_color=SURFACE_HOVER,
             button_hover_color=BORDER, dropdown_fg_color=SURFACE_HIGH,
             dropdown_hover_color=SURFACE_HOVER, text_color=TEXT,
@@ -251,7 +306,8 @@ class ModernP00PWindow(Ctk.CTk):
         self.SortMenu.grid(row=0, column=1, sticky="w")
         self.SortDirectionButton = Ctk.CTkButton(
             SortBar, text="↑", command=self.ToggleSortDirection, width=34, height=30,
-            corner_radius=8, fg_color=SURFACE_HIGH, hover_color=SURFACE_HOVER,
+            corner_radius=0, fg_color=SURFACE_HIGH, hover_color=SURFACE_HOVER,
+            border_width=1, border_color=BORDER,
             text_color=TEXT, font=Ctk.CTkFont(family=FONT, size=14, weight="bold"),
         )
         self.SortDirectionButton.grid(row=0, column=2, sticky="e")
@@ -284,7 +340,7 @@ class ModernP00PWindow(Ctk.CTk):
             self.EntryList,
             height=52,
             fg_color=ACCENT if Selected else SURFACE_HIGH,
-            corner_radius=10,
+            corner_radius=0,
             border_width=1,
             border_color=ACCENT if Selected else BORDER,
             cursor="pointinghand",
@@ -294,7 +350,7 @@ class ModernP00PWindow(Ctk.CTk):
         Frame.grid_columnconfigure(0, weight=4)
         Frame.grid_columnconfigure(1, weight=3)
         Frame.grid_columnconfigure(2, weight=2)
-        Color = "#1a0f09" if Selected else TEXT
+        Color = BUTTON_TEXT if Selected else TEXT
         Health = "OK" if Row["health"] == 0 else f"{Row['health']} issues"
         Values = (Name, Row["username"], Health)
         for Column, Value in enumerate(Values):
@@ -313,16 +369,18 @@ class ModernP00PWindow(Ctk.CTk):
 
     #MARK: detail pane stuffs
     def BuildDetailPane(self, Parent):
-        Pane = Ctk.CTkFrame(Parent, fg_color=SURFACE, corner_radius=16,
-                           border_width=1, border_color=BORDER)
+        Pane = Ctk.CTkFrame(Parent, fg_color=SURFACE, corner_radius=0,
+                           border_width=2, border_color=BORDER)
         Pane.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
         Pane.grid_columnconfigure(0, weight=1)
         Pane.grid_rowconfigure(8, weight=1)
 
+        DetailHeader = Ctk.CTkFrame(Pane, fg_color=TITLE_BAR, corner_radius=0)
+        DetailHeader.grid(row=0, column=0, sticky="ew")
         Ctk.CTkLabel(
-            Pane, text="Entry details", text_color=TEXT,
-            font=Ctk.CTkFont(family=FONT, size=18, weight="bold"),
-        ).grid(row=0, column=0, sticky="w", padx=20, pady=(20, 14))
+            DetailHeader, text="ENTRY OUTPUT", text_color=BUTTON_TEXT,
+            font=Ctk.CTkFont(family=FONT, size=15, weight="bold"),
+        ).pack(anchor="w", padx=12, pady=7)
         self.NameValue = self.DetailRow(Pane, 1, "NAME")
         self.UsernameValue = self.DetailRow(Pane, 2, "USERNAME")
         self.PasswordValue = self.DetailRow(Pane, 3, "PASSWORD")
@@ -334,7 +392,7 @@ class ModernP00PWindow(Ctk.CTk):
             font=Ctk.CTkFont(family=FONT, size=9, weight="bold"),
         ).grid(row=6, column=0, sticky="w", padx=20, pady=(12, 5))
         self.NotesText = Ctk.CTkTextbox(
-            Pane, height=92, corner_radius=10, fg_color=SURFACE_HIGH,
+            Pane, height=92, corner_radius=0, fg_color=SURFACE_HIGH,
             border_width=1, border_color=BORDER, text_color=TEXT,
             font=Ctk.CTkFont(family=FONT, size=11), wrap="word",
         )
@@ -350,14 +408,14 @@ class ModernP00PWindow(Ctk.CTk):
             Buttons, "Copy username", self.CopyUsername, 0, 2
         )
         self.EditButton = Ctk.CTkButton(
-            Buttons, text="Edit entry", command=self.EditEntry, height=38,
-            corner_radius=10, fg_color=ACCENT, hover_color=ACCENT_HOVER,
-            text_color="#1a0f09", font=Ctk.CTkFont(family=FONT, size=11, weight="bold"),
+            Buttons, text="EDIT ENTRY", command=self.EditEntry, height=38,
+            corner_radius=0, fg_color=ACCENT, hover_color=ACCENT_HOVER,
+            text_color=BUTTON_TEXT, font=Ctk.CTkFont(family=FONT, size=11, weight="bold"),
         )
         self.EditButton.grid(row=1, column=0, columnspan=2, sticky="ew", padx=(0, 4), pady=(8, 0))
         self.RemoveButton = Ctk.CTkButton(
-            Buttons, text="Remove", command=self.RemoveEntry, height=38,
-            corner_radius=10, fg_color="#2a171c", hover_color="#3b2027",
+            Buttons, text="REMOVE", command=self.RemoveEntry, height=38,
+            corner_radius=0, fg_color="#241110", hover_color="#3a1715",
             text_color=RED, font=Ctk.CTkFont(family=FONT, size=11, weight="bold"),
         )
         self.RemoveButton.grid(row=1, column=2, sticky="ew", padx=(4, 0), pady=(8, 0))
@@ -379,8 +437,9 @@ class ModernP00PWindow(Ctk.CTk):
 
     def ActionButton(self, Parent, TextValue, Command, Row, Column):
         Button = Ctk.CTkButton(
-            Parent, text=TextValue, command=Command, height=36, corner_radius=9,
+            Parent, text=TextValue.upper(), command=Command, height=36, corner_radius=0,
             fg_color=SURFACE_HIGH, hover_color=SURFACE_HOVER, text_color=TEXT,
+            border_width=1, border_color=BORDER,
             font=Ctk.CTkFont(family=FONT, size=10, weight="bold"),
         )
         Button.grid(row=Row, column=Column, sticky="ew", padx=(0 if Column == 0 else 4,
@@ -699,7 +758,7 @@ class ModernP00PWindow(Ctk.CTk):
             MessageBox.showinfo("No vault open", "Open a vault before scoring it", parent=self)
             return
         try:
-            Report = Main.SecurityTheaterReport(self.FilePath).AsText()
+            Report = SecurityTheaterReport(self.FilePath).AsText()
         except Main.P00PError as Exc:
             self.ShowError("The applause meter broke", Exc)
             return
@@ -775,15 +834,15 @@ class ModernEntryDialog(Ctk.CTkToplevel):
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(0, weight=1)
-        Card = Ctk.CTkFrame(self, fg_color=SURFACE, corner_radius=16,
-                           border_width=1, border_color=BORDER)
+        Card = Ctk.CTkFrame(self, fg_color=SURFACE, corner_radius=0,
+                           border_width=2, border_color=BORDER)
         Card.grid(row=0, column=0, sticky="nsew", padx=16, pady=16)
         Card.grid_columnconfigure(0, weight=1)
         Card.grid_rowconfigure(9, weight=1)
 
         Ctk.CTkLabel(
-            Card, text=Title, text_color=TEXT,
-            font=Ctk.CTkFont(family=FONT, size=22, weight="bold"),
+            Card, text=Title.upper(), text_color=TEXT,
+            font=Ctk.CTkFont(family=FONT, size=19, weight="bold"),
         ).grid(row=0, column=0, sticky="w", padx=24, pady=(22, 16))
         self.NameEntry = self.Field(Card, 1, "Name", self.NameText)
         self.Field(Card, 3, "Username", self.UsernameText)
@@ -796,13 +855,13 @@ class ModernEntryDialog(Ctk.CTkToplevel):
         PasswordRow.grid_columnconfigure(0, weight=1)
         self.PasswordEntry = Ctk.CTkEntry(
             PasswordRow, textvariable=self.PasswordText, show="•", height=40,
-            corner_radius=10, fg_color=SURFACE_HIGH, border_color=BORDER, text_color=TEXT,
+            corner_radius=0, fg_color=SURFACE_HIGH, border_color=BORDER, text_color=TEXT,
         )
         self.PasswordEntry.grid(row=0, column=0, sticky="ew")
         Ctk.CTkButton(
-            PasswordRow, text="Generate", command=self.Generate, width=92, height=40,
-            corner_radius=10, fg_color=ACCENT, hover_color=ACCENT_HOVER,
-            text_color="#1a0f09", font=Ctk.CTkFont(family=FONT, size=11, weight="bold"),
+            PasswordRow, text="GENERATE", command=self.Generate, width=92, height=40,
+            corner_radius=0, fg_color=ACCENT, hover_color=ACCENT_HOVER,
+            text_color=BUTTON_TEXT, font=Ctk.CTkFont(family=FONT, size=11, weight="bold"),
         ).grid(row=0, column=1, padx=(8, 0))
 
         Options = Ctk.CTkFrame(Card, fg_color="transparent")
@@ -816,7 +875,7 @@ class ModernEntryDialog(Ctk.CTkToplevel):
         Ctk.CTkLabel(Options, text="Length", text_color=MUTED).pack(side="left", padx=(18, 6))
         Ctk.CTkEntry(
             Options, textvariable=self.PasswordLength, width=54, height=30,
-            corner_radius=8, fg_color=SURFACE_HIGH, border_color=BORDER,
+            corner_radius=0, fg_color=SURFACE_HIGH, border_color=BORDER,
         ).pack(side="left")
         Ctk.CTkSwitch(
             Options, text="Symbols", variable=self.UseSymbols,
@@ -825,7 +884,8 @@ class ModernEntryDialog(Ctk.CTkToplevel):
 
         self.HealthLabel = Ctk.CTkLabel(
             Card, textvariable=self.HealthText, anchor="w", justify="left",
-            wraplength=450, corner_radius=9, fg_color="#2b211b", text_color=WARNING,
+            wraplength=450, corner_radius=0, fg_color=SURFACE_HIGH, text_color=WARNING,
+            border_width=1, border_color=BORDER,
             font=Ctk.CTkFont(family=FONT, size=10, weight="bold"),
         )
         self.HealthLabel.grid(row=8, column=0, sticky="ew", padx=24, pady=(12, 10), ipady=7)
@@ -838,7 +898,7 @@ class ModernEntryDialog(Ctk.CTkToplevel):
                      font=Ctk.CTkFont(family=FONT, size=9, weight="bold")).grid(
             row=0, column=0, sticky="w", pady=(0, 5))
         self.Notes = Ctk.CTkTextbox(
-            NotesFrame, height=100, corner_radius=10, fg_color=SURFACE_HIGH,
+            NotesFrame, height=100, corner_radius=0, fg_color=SURFACE_HIGH,
             border_width=1, border_color=BORDER, text_color=TEXT,
         )
         self.Notes.grid(row=1, column=0, sticky="nsew")
@@ -848,12 +908,13 @@ class ModernEntryDialog(Ctk.CTkToplevel):
         Buttons.grid(row=10, column=0, sticky="ew", padx=24, pady=(18, 24))
         Buttons.grid_columnconfigure((0, 1), weight=1)
         Ctk.CTkButton(
-            Buttons, text="Cancel", command=self.destroy, height=40, corner_radius=10,
+            Buttons, text="CANCEL", command=self.destroy, height=40, corner_radius=0,
             fg_color=SURFACE_HIGH, hover_color=SURFACE_HOVER, text_color=TEXT,
+            border_width=1, border_color=BORDER,
         ).grid(row=0, column=0, sticky="ew", padx=(0, 5))
         Ctk.CTkButton(
-            Buttons, text="Save entry", command=self.Save, height=40, corner_radius=10,
-            fg_color=ACCENT, hover_color=ACCENT_HOVER, text_color="#1a0f09",
+            Buttons, text="SAVE ENTRY", command=self.Save, height=40, corner_radius=0,
+            fg_color=ACCENT, hover_color=ACCENT_HOVER, text_color=BUTTON_TEXT,
             font=Ctk.CTkFont(family=FONT, size=11, weight="bold"),
         ).grid(row=0, column=1, sticky="ew", padx=(5, 0))
 
@@ -872,7 +933,7 @@ class ModernEntryDialog(Ctk.CTkToplevel):
                      font=Ctk.CTkFont(family=FONT, size=9, weight="bold")).grid(
             row=0, column=0, sticky="w", pady=(0, 5))
         Entry = Ctk.CTkEntry(
-            Frame, textvariable=Variable, height=40, corner_radius=10,
+            Frame, textvariable=Variable, height=40, corner_radius=0,
             fg_color=SURFACE_HIGH, border_color=BORDER, text_color=TEXT,
         )
         Entry.grid(row=1, column=0, sticky="ew")
@@ -896,9 +957,9 @@ class ModernEntryDialog(Ctk.CTkToplevel):
         Summary = PasswordHealthSummary(self.PasswordText.get())
         self.HealthText.set(Summary["text"])
         if Summary["healthy"]:
-            self.HealthLabel.configure(fg_color="#17251c", text_color=GREEN)
+            self.HealthLabel.configure(fg_color="#101d13", text_color=GREEN)
         else:
-            self.HealthLabel.configure(fg_color="#2b211b", text_color=WARNING)
+            self.HealthLabel.configure(fg_color=SURFACE_HIGH, text_color=WARNING)
 
     def Save(self):
         Name = self.NameText.get().strip()
@@ -940,18 +1001,18 @@ class ModernTextWindow(Ctk.CTkToplevel):
         self.transient(Parent)
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(0, weight=1)
-        Card = Ctk.CTkFrame(self, fg_color=SURFACE, corner_radius=16,
-                           border_width=1, border_color=BORDER)
+        Card = Ctk.CTkFrame(self, fg_color=SURFACE, corner_radius=0,
+                           border_width=2, border_color=BORDER)
         Card.grid(row=0, column=0, sticky="nsew", padx=16, pady=16)
         Card.grid_columnconfigure(0, weight=1)
         Card.grid_rowconfigure(1, weight=1)
         Ctk.CTkLabel(
-            Card, text=Title, text_color=TEXT,
-            font=Ctk.CTkFont(family=FONT, size=22, weight="bold"),
+            Card, text=Title.upper(), text_color=TEXT,
+            font=Ctk.CTkFont(family=FONT, size=19, weight="bold"),
         ).grid(row=0, column=0, sticky="w", padx=24, pady=(22, 14))
         FontName = MONO_FONT if Monospace else FONT
         TextBox = Ctk.CTkTextbox(
-            Card, corner_radius=10, fg_color=SURFACE_HIGH, border_width=1,
+            Card, corner_radius=0, fg_color=SURFACE_HIGH, border_width=1,
             border_color=BORDER, text_color=TEXT,
             font=Ctk.CTkFont(family=FontName, size=12), wrap="word",
         )
@@ -959,9 +1020,9 @@ class ModernTextWindow(Ctk.CTkToplevel):
         TextBox.insert("1.0", Content)
         TextBox.configure(state="disabled")
         Ctk.CTkButton(
-            Card, text="Done", command=self.destroy, width=100, height=38,
-            corner_radius=10, fg_color=ACCENT, hover_color=ACCENT_HOVER,
-            text_color="#1a0f09",
+            Card, text="DONE", command=self.destroy, width=100, height=38,
+            corner_radius=0, fg_color=ACCENT, hover_color=ACCENT_HOVER,
+            text_color=BUTTON_TEXT,
         ).grid(row=2, column=0, sticky="e", padx=24, pady=22)
         self.bind("<Escape>", lambda _Event: self.destroy())
 
@@ -974,24 +1035,24 @@ class ModernSecretWindow(Ctk.CTkToplevel):
         self.geometry("480x330")
         self.resizable(False, False)
         self.transient(Parent)
-        Card = Ctk.CTkFrame(self, fg_color=SURFACE, corner_radius=18,
+        Card = Ctk.CTkFrame(self, fg_color=SURFACE, corner_radius=0,
                            border_width=1, border_color=ACCENT)
         Card.pack(fill="both", expand=True, padx=16, pady=16)
         Ctk.CTkLabel(
             Card, text=Emoji, font=Ctk.CTkFont(family="Apple Color Emoji", size=50),
         ).pack(pady=(24, 8))
         Ctk.CTkLabel(
-            Card, text=Title, text_color=TEXT,
-            font=Ctk.CTkFont(family=FONT, size=20, weight="bold"),
+            Card, text=Title.upper(), text_color=TEXT,
+            font=Ctk.CTkFont(family=FONT, size=18, weight="bold"),
         ).pack()
         Ctk.CTkLabel(
             Card, text=Message, text_color=MUTED, justify="center", wraplength=390,
             font=Ctk.CTkFont(family=FONT, size=12),
         ).pack(padx=28, pady=(12, 20))
         Ctk.CTkButton(
-            Card, text="Return to vault", command=self.destroy, width=150, height=38,
-            corner_radius=10, fg_color=ACCENT, hover_color=ACCENT_HOVER,
-            text_color="#1a0f09",
+            Card, text="RETURN TO VAULT", command=self.destroy, width=150, height=38,
+            corner_radius=0, fg_color=ACCENT, hover_color=ACCENT_HOVER,
+            text_color=BUTTON_TEXT,
         ).pack()
         self.bind("<Escape>", lambda _Event: self.destroy())
 
