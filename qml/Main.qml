@@ -226,10 +226,15 @@ ApplicationWindow {
         }
         Rectangle {
             id: dropdown
-            y: combo.height
+            // the list has to live at the crt scene root. qt draws children outside a
+            // control, but it will not send those children mouse clicks out there.
+            parent: uiRoot
+            x: combo.mapToItem(uiRoot, 0, 0).x + uiRoot.width * 0
+            y: combo.mapToItem(uiRoot, 0, combo.height).y + uiRoot.height * 0
             width: combo.width
             height: Math.min(optionList.contentHeight + 2, 160)
             visible: combo.expanded
+            z: 8001
             color: window.panelHighColor
             border.width: 1
             border.color: window.borderColor
